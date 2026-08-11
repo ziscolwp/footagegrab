@@ -93,6 +93,8 @@
   var importing = false;
   var lastError = "";
   var recent = [];       // [{name, tag, time}]
+  var failCounts = {};   // path -> failed import attempts this session
+  var MAX_ATTEMPTS = 3;
 
   function listEntries(dir) {
     var names = fs.readdirSync(dir);
@@ -174,9 +176,29 @@
       lastError = "";
       recordOutcome(readyEntries, res.imported || [], "imported");
       recordOutcome(readyEntries, res.skipped || [], "already in project");
+      recordFailures(readyEntries, res.failed || []);
       renderRecent();
       renderStatusError();
     });
+  }
+
+  // A file Premiere can't import retries a couple of ticks (it may still be
+  // settling), then gets a dedupe key so it stops poisoning every scan.
+  function recordFailures(entries, paths) {
+    for (var i = 0; i < paths.length; i++) {
+      failCounts[paths[i]] = (failCounts[paths[i]] || 0) + 1;
+      if (failCounts[paths[i]] < MAX_ATTEMPTS) continue;
+      for (var j = 0; j < entries.length; j++) {
+        if (entries[j].path === paths[i]) {
+          seenAdd(FGWatch.dedupeKey(entries[j].path, entries[j].size, entries[j].mtimeMs));
+          recent.unshift({ name: entries[j].name, tag: "failed", time: new Date() });
+        }
+      }
+    }
+    if (paths.length) {
+      lastError = paths.length + " file(s) Premiere couldn't import (unsupported format?)";
+    }
+    if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
   }
 
   function recordOutcome(entries, paths, tag) {
@@ -229,7 +251,8 @@
       name.textContent = recent[i].name;
       name.title = recent[i].name;
       var tag = document.createElement("span");
-      tag.className = "import-tag" + (recent[i].tag === "imported" ? "" : " dup");
+      tag.className = "import-tag" +
+        (recent[i].tag === "imported" ? "" : recent[i].tag === "failed" ? " fail" : " dup");
       tag.textContent = recent[i].tag;
       var time = document.createElement("span");
       time.className = "import-time";

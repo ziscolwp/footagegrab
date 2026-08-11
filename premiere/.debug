@@ -2,7 +2,7 @@
 <ExtensionList>
   <Extension Id="com.footagegrab.bridge">
     <HostList>
-      <Host Name="PPRO" Port="8092" />
+      <Host Name="PPRO" Port="8098" />
     </HostList>
   </Extension>
 </ExtensionList>

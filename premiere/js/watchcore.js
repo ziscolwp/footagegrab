@@ -55,6 +55,8 @@
     pruneKeys: pruneKeys,
   };
 
+  // CEP's --mixed-context injects Node's `module` into the page, so this
+  // must be if/if, not if/else — the panel needs root.FGWatch regardless.
   if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else root.FGWatch = api;
+  if (root) root.FGWatch = api;
 })(this);

@@ -96,10 +96,25 @@ function FG_importBatch(paths, binName) {
     }
     var bin = FG__ensureBin(binName || "FootageGrab");
     if (!bin) return FG__err("could not create bin: " + binName);
-    var ok = app.project.importFiles(toImport, true, bin, false);
-    if (!ok) return FG__err("Premiere rejected the import");
-    return '{"ok":true,"imported":' + FG__arr(toImport) +
-           ',"skipped":' + FG__arr(skipped) + "}";
+    // batch first (one undo step); if Premiere rejects the batch, fall back
+    // to per-file so one unimportable file can't poison the others
+    var imported = [];
+    var failed = [];
+    var ok = false;
+    try { ok = app.project.importFiles(toImport, true, bin, false); } catch (eb) { ok = false; }
+    if (ok) {
+      imported = toImport;
+    } else {
+      for (var k = 0; k < toImport.length; k++) {
+        var one = false;
+        try { one = app.project.importFiles([toImport[k]], true, bin, false); } catch (eo) { one = false; }
+        if (one) imported.push(toImport[k]);
+        else failed.push(toImport[k]);
+      }
+    }
+    return '{"ok":true,"imported":' + FG__arr(imported) +
+           ',"skipped":' + FG__arr(skipped) +
+           ',"failed":' + FG__arr(failed) + "}";
   } catch (e) {
     return FG__err("import failed: " + e.toString());
   }

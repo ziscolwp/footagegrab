@@ -136,4 +136,5 @@ input[type="text"]:focus { outline: 1px solid var(--in); }
 }
 .import-tag { font-size: 10px; color: var(--in); flex-shrink: 0; }
 .import-tag.dup { color: var(--dim); }
+.import-tag.fail { color: var(--danger); }
 .import-time { font-size: 10px; color: var(--dim); flex-shrink: 0; }
