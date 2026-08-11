@@ -20,6 +20,15 @@
   </nav>
 
   <main id="view-queue" class="view">
+    <section id="grab-page" hidden>
+      <div class="grab-row">
+        <div class="grab-info">
+          <div class="grab-label">Grab this page</div>
+          <code id="grab-host" class="grab-host">—</code>
+        </div>
+        <button id="grab-page-btn" class="btn">Grab</button>
+      </div>
+    </section>
     <section>
       <h2>Downloading</h2>
       <div id="active-list" class="list"></div>
@@ -108,8 +117,8 @@
         <input type="text" id="tpl-full" spellcheck="false">
         <code class="preview" id="tpl-full-preview"></code>
       </div>
-      <p class="hint">Tokens: <code>{title}</code> <code>{id}</code> <code>{start}</code>
-      <code>{end}</code> <code>{date}</code> <code>{quality}</code></p>
+      <p class="hint">Tokens: <code>{title}</code> <code>{id}</code> <code>{site}</code>
+      <code>{start}</code> <code>{end}</code> <code>{date}</code> <code>{quality}</code></p>
     </section>
 
     <section class="card">

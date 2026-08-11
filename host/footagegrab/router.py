@@ -3,7 +3,7 @@
 import json
 import logging
 
-from . import config, system, timefmt
+from . import config, prefetch, system, timefmt
 from .jobs import Job, RUNNING
 
 log = logging.getLogger("footagegrab.router")
@@ -79,6 +79,8 @@ class Router:
             "url": url,
             "video_id": str(msg.get("video_id") or "")[:32],
             "title": str(msg.get("title") or "")[:300],
+            "site": prefetch.site_from_url(url),
+            "source": str(msg.get("source") or "player")[:24],
         }
         mode = msg.get("mode") or ("segments" if msg.get("segments") else "full")
         jobs = []

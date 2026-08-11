@@ -1,0 +1,35 @@
+/* Adapter-site chrome: viewport-fixed toasts + per-video grab buttons.
+   Loaded alongside content.css, which owns the toast card styles. */
+
+.fg-toasts-fixed {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483000;
+}
+
+.fg-site-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2147482000;
+  background: var(--fg-surface);
+  color: var(--fg-text);
+  border: 1px solid rgba(23, 201, 100, 0.55);
+  border-radius: 8px;
+  font: 700 11px/1 Roboto, Arial, sans-serif;
+  letter-spacing: 0.3px;
+  padding: 6px 9px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+:hover > .fg-site-btn,
+.fg-site-btn:focus-visible,
+.fg-site-btn:disabled {
+  opacity: 1;
+}
+.fg-site-btn:hover {
+  background: #17c964;
+  color: #08160d;
+}

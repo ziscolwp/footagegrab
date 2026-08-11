@@ -9,7 +9,7 @@ function meta(job) {
   if (job.mode === "segment" && job.start != null) {
     return `${fmtClock(job.start)}–${fmtClock(job.end)} · ${fmtClock(job.end - job.start)}`;
   }
-  return "Full video";
+  return job.site && job.site !== "youtube" ? `Full video · ${job.site}` : "Full video";
 }
 
 function jobRow(job) {

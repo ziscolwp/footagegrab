@@ -22,10 +22,30 @@ function wireTabs() {
   }
 }
 
+// One-click full-video grab of whatever tab the popup opened over.
+async function wireGrabRow() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  if (!tab?.url || !/^https?:\/\//i.test(tab.url)) return; // stays hidden
+  $("grab-page").hidden = false;
+  try { $("grab-host").textContent = new URL(tab.url).hostname; } catch (e) { /* keep dash */ }
+  const btn = $("grab-page-btn");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Queuing…";
+    const res = await host({ type: "enqueue", url: tab.url, mode: "full", source: "toolbar" })
+      .catch(e => ({ ok: false, error: e.message }));
+    btn.textContent = res?.ok ? "Queued ✓" : "Failed";
+    if (!res?.ok) btn.title = res?.error || "";
+    setTimeout(() => { btn.disabled = false; btn.textContent = "Grab"; }, 1800);
+    queue.refresh();
+  });
+}
+
 async function boot() {
   wireTabs();
   settings.wire();
   queue.refresh();
+  wireGrabRow();
 
   const ping = await host({ type: "ping" }, 20000).catch(e => ({ ok: false, error: e.message }));
   if (ping?.ok) {

@@ -8,7 +8,7 @@ let saveTimer = null;
 const $ = id => document.getElementById(id);
 
 const PREVIEW_FIELDS = {
-  title: "Oprah_Interview", id: "dQw4w9WgXcQ",
+  title: "Oprah_Interview", id: "dQw4w9WgXcQ", site: "youtube",
   start: "00.42", end: "01.18", date: "2026-08-11", quality: "best",
 };
 

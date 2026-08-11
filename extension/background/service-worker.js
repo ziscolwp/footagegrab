@@ -76,10 +76,79 @@ function onHostMessage(m) {
 async function broadcast(payload) {
   try { await chrome.runtime.sendMessage(payload); } catch (e) { /* popup closed */ }
   try {
-    const tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
+    // all tabs: YouTube + adapter sites have listeners; the rest just reject
+    const tabs = await chrome.tabs.query({});
     await Promise.allSettled(tabs.map(t => chrome.tabs.sendMessage(t.id, payload)));
   } catch (e) { /* no tabs */ }
 }
+
+// ---- one-click grab surfaces: context menu, keyboard command ------------
+
+function pickGrabUrl(info, tab) {
+  // link beats media src beats page: right-clicking a tweet timestamp or a
+  // Reddit title should grab that post, not the timeline. Media srcs are
+  // often blob: URLs, which the http(s) filter rejects.
+  const candidates = [info.linkUrl, info.srcUrl, info.pageUrl, tab && tab.url];
+  for (const c of candidates) if (c && /^https?:\/\//i.test(c)) return c;
+  return null;
+}
+
+async function grabUrl(url, source, tabId) {
+  if (!url) {
+    flashInTab(tabId, false, "Nothing grabbable here");
+    return;
+  }
+  try {
+    const res = await hostRequest({ type: "enqueue", url, mode: "full", source });
+    if (res?.ok) flashInTab(tabId, true, "Queued — grabbing video");
+    else flashInTab(tabId, false, res?.error || "Could not queue the grab");
+  } catch (e) {
+    flashInTab(tabId, false, e.message);
+  }
+}
+
+// Tiny injected ack toast: works on any page, no content script needed.
+function flashInTab(tabId, ok, text) {
+  if (tabId == null) return;
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: (ok, text) => {
+      const el = document.createElement("div");
+      el.textContent = (ok ? "✓ " : "✕ ") + text;
+      el.style.cssText =
+        "position:fixed;right:16px;bottom:16px;z-index:2147483647;" +
+        "background:rgba(16,16,18,0.92);color:#f2f2f0;" +
+        `border:1px solid ${ok ? "rgba(23,201,100,0.5)" : "rgba(255,92,119,0.5)"};` +
+        "border-radius:10px;padding:10px 14px;font:500 12.5px/1.4 Roboto,Arial,sans-serif;" +
+        "box-shadow:0 4px 16px rgba(0,0,0,0.4);transition:opacity 0.3s ease;";
+      document.documentElement.appendChild(el);
+      setTimeout(() => { el.style.opacity = "0"; }, ok ? 1900 : 4700);
+      setTimeout(() => el.remove(), ok ? 2200 : 5000);
+    },
+    args: [ok, text],
+  }).catch(() => { /* restricted page — badge still shows the job */ });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "fg-grab",
+      title: "Grab video with FootageGrab",
+      contexts: ["page", "link", "video"],
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== "fg-grab") return;
+  grabUrl(pickGrabUrl(info, tab), "context_menu", tab?.id);
+});
+
+chrome.commands.onCommand.addListener(async command => {
+  if (command !== "grab-page") return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && tab.url && /^https?:\/\//i.test(tab.url)) grabUrl(tab.url, "shortcut", tab.id);
+});
 
 function updateBadge() {
   const active = [...jobs.values()]

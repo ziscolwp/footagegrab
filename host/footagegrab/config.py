@@ -19,7 +19,7 @@ DEFAULTS = {
     "compat_transcode": True,  # convert VP9/AV1 (all 4K+) to H.264 for Premiere
     "cookies_browser": "none",  # none | chrome | brave | chromium | edge
     "template_segment": "{title}_{start}-{end}_{id}",
-    "template_full": "{title}_{id}",
+    "template_full": "{title}_{site}_{id}",
     "max_concurrent": 2,
     "ytdlp_path": "",
     "ffmpeg_path": "",

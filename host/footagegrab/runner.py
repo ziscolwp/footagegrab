@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import compat, config, naming, sections, timefmt
+from . import compat, config, naming, prefetch, sections, timefmt
 
 log = logging.getLogger("footagegrab.runner")
 
@@ -41,6 +41,7 @@ class DownloadRunner:
 
         quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
+        self._ensure_metadata(job, cfg, ytdlp, on_progress)
         path = self._plan_path(job, cfg, out_dir, quality)
         try:
             argv = sections.build_download_args(
@@ -161,11 +162,30 @@ class DownloadRunner:
                     job.id, info["vcodec"])
         return path, ""
 
+    def _ensure_metadata(self, job, cfg, ytdlp, on_progress):
+        """Context-menu/adapter grabs arrive with only a URL — resolve title,
+        id, and site via a quick simulate run. Failure is fine: naming falls
+        back to site+date and the download proceeds regardless."""
+        if job.title and job.video_id:
+            return
+        if on_progress:
+            on_progress(None, "fetching info")
+        meta = prefetch.fetch_metadata(
+            ytdlp, job.url, cookies_browser=cfg.get("cookies_browser"),
+        )
+        if meta:
+            job.title = job.title or meta["title"]
+            job.video_id = job.video_id or meta["id"]
+            job.site = meta["site"] or job.site
+
     def _plan_path(self, job, cfg, out_dir, quality):
+        site = job.site or prefetch.site_from_url(job.url)
+        date = time.strftime("%Y-%m-%d")
         fields = {
-            "title": naming.slugify(job.title or job.video_id or "clip"),
-            "id": job.video_id or "video",
-            "date": time.strftime("%Y-%m-%d"),
+            "title": naming.slugify(job.title or job.video_id or f"{site}_{date}"),
+            "id": job.video_id or "",
+            "site": site,
+            "date": date,
             "quality": quality,
         }
         if job.mode == "segment":
@@ -198,7 +218,12 @@ class DownloadRunner:
         errors = [l for l in lines if "ERROR" in l]
         picked = errors[-2:] if errors else lines[-3:]
         text = " | ".join(picked).strip()
-        return text[:400] if text else f"yt-dlp exited with code {rc}"
+        if not text:
+            return f"yt-dlp exited with code {rc}"
+        hint = prefetch.hint_for_error(text)
+        if hint:
+            text = f"{text[:320]} — {hint}"
+        return text[:400]
 
     @staticmethod
     def _find_output(path):

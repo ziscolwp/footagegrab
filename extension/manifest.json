@@ -1,15 +1,21 @@
 {
   "manifest_version": 3,
   "name": "FootageGrab",
-  "version": "0.1.0",
-  "description": "Mark In/Out on YouTube and grab clips straight into your Premiere footage folder.",
+  "version": "0.3.0",
+  "description": "Mark In/Out on YouTube — or one-click grab from X, Reddit, TikTok and more — straight into your Premiere footage folder.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoLrA5gd4AmLRf5PCm4mHSV8kHUQ+m8IKKq9A0WaCOc2TQOiZkSRI7jwjS1F4v592a8BcTiBxhmPGKtT0xV77ofwpfmYXD/3aXP1DcGi9L0R1+ryAU0EaoKJwxVeZtI6BUcI1B8RPG4GZu+cRMaVGNVKMjsjlb/lycIL12DzX4Gy7Y0s1Dr55FbYDhsmSdKgBGYyRtUTvQxgaFVgpZ+pGZDRK0pBi2HZNyJfMz5hRl+ShaWMBzTllXjmmMbtpGeKpJDL6CYk34Q12xvlWHZX3ses7opySzYto6KnOZLY/jF8dUw/zdZVdFrQAbh9INgz+W0mZi1hkpISvA6ZXknVu5wIDAQAB",
   "minimum_chrome_version": "116",
-  "permissions": ["nativeMessaging", "storage"],
-  "host_permissions": ["https://www.youtube.com/*"],
+  "permissions": ["nativeMessaging", "storage", "contextMenus", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
+  },
+  "commands": {
+    "grab-page": {
+      "suggested_key": { "default": "Alt+G" },
+      "description": "Grab the video on the current page"
+    }
   },
   "content_scripts": [
     {
@@ -24,6 +30,29 @@
         "content/main.js"
       ],
       "css": ["content/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.tiktok.com/*",
+        "https://www.reddit.com/*",
+        "https://old.reddit.com/*",
+        "https://new.reddit.com/*",
+        "https://www.instagram.com/*"
+      ],
+      "js": [
+        "content/time.js",
+        "content/toasts.js",
+        "content/sites/resolve.js",
+        "content/sites/core.js",
+        "content/sites/x.js",
+        "content/sites/reddit.js",
+        "content/sites/tiktok.js",
+        "content/sites/instagram.js"
+      ],
+      "css": ["content/content.css", "content/sites/sites.css"],
       "run_at": "document_idle"
     }
   ],

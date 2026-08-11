@@ -8,12 +8,19 @@
   let container = null;
   const cards = new Map(); // job id -> element
   const MAX_VISIBLE = 4;
+  let quick = false; // faster auto-dismiss for high-volume one-click grabs
 
-  function mount(playerEl) {
+  function configure(opts) {
+    quick = !!(opts && opts.quickDismiss);
+  }
+
+  // Anchors inside a player (YouTube) or fixed to the viewport (adapter
+  // sites, where there is no player chrome to anchor to).
+  function mount(hostEl, opts) {
     unmount();
     container = document.createElement("div");
-    container.className = "fg-toasts";
-    playerEl.appendChild(container);
+    container.className = "fg-toasts" + (opts && opts.fixed ? " fg-toasts-fixed" : "");
+    hostEl.appendChild(container);
   }
 
   function unmount() {
@@ -52,7 +59,7 @@
     }
     container.appendChild(el);
     trim();
-    const timeout = opts.timeout ?? (kind === "error" ? 0 : 4000);
+    const timeout = opts.timeout ?? (kind === "error" ? 0 : quick ? 2000 : 4000);
     if (timeout) setTimeout(() => el.remove(), timeout);
     return el;
   }
@@ -132,7 +139,7 @@
       addBtn("✕", () => sendHost({ type: "cancel", job_id: job.id }));
     } else if (job.state === "done") {
       addBtn("Reveal", () => sendHost({ type: "reveal", path: job.file }));
-      setTimeout(() => { el.remove(); cards.delete(job.id); }, 8000);
+      setTimeout(() => { el.remove(); cards.delete(job.id); }, quick ? 2000 : 8000);
     } else if (job.state === "failed") {
       addBtn("Retry", () => { sendHost({ type: "retry", job_id: job.id }); el.remove(); cards.delete(job.id); });
       addBtn("✕", () => { el.remove(); cards.delete(job.id); });
@@ -145,5 +152,5 @@
     return (job.error || "Download failed").slice(0, 140);
   }
 
-  window.FG.toasts = { mount, unmount, show, upsertJob };
+  window.FG.toasts = { mount, unmount, show, upsertJob, configure };
 })();
