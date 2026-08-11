@@ -182,9 +182,11 @@ class DownloadRunner:
         site = job.site or prefetch.site_from_url(job.url)
         date = time.strftime("%Y-%m-%d")
         fields = {
-            "title": naming.slugify(job.title or job.video_id or f"{site}_{date}"),
+            "title": naming.slugify(job.custom_name or job.title or job.video_id
+                                    or f"{site}_{date}"),
             "id": job.video_id or "",
             "site": site,
+            "n": job.n if job.n is not None else "",
             "date": date,
             "quality": quality,
         }

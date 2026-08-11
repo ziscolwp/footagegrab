@@ -28,12 +28,17 @@ async function wireGrabRow() {
   if (!tab?.url || !/^https?:\/\//i.test(tab.url)) return; // stays hidden
   $("grab-page").hidden = false;
   try { $("grab-host").textContent = new URL(tab.url).hostname; } catch (e) { /* keep dash */ }
+  host({ type: "get_config" })
+    .then(res => { $("grab-name").hidden = !res?.config?.ask_names; })
+    .catch(() => {});
   const btn = $("grab-page-btn");
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "Queuing…";
-    const res = await host({ type: "enqueue", url: tab.url, mode: "full", source: "toolbar" })
-      .catch(e => ({ ok: false, error: e.message }));
+    const res = await host({
+      type: "enqueue", url: tab.url, mode: "full", source: "toolbar",
+      custom_name: $("grab-name").value.trim(),
+    }).catch(e => ({ ok: false, error: e.message }));
     btn.textContent = res?.ok ? "Queued ✓" : "Failed";
     if (!res?.ok) btn.title = res?.error || "";
     setTimeout(() => { btn.disabled = false; btn.textContent = "Grab"; }, 1800);

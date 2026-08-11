@@ -9,15 +9,23 @@ from footagegrab.naming import render_template, slugify, unique_path
 
 
 class SlugifyTests(unittest.TestCase):
-    def test_forbidden_characters_become_underscores(self):
+    # v0.3.1: names stay human — spaces are kept (Premiere shows the filename
+    # as the clip name); only filesystem-hostile characters are scrubbed.
+    def test_forbidden_characters_removed_spaces_kept(self):
         self.assertEqual(slugify('Oprah: The "Lost" Interview / Part 2'),
-                         "Oprah_The_Lost_Interview_Part_2".replace('"', ""))
+                         "Oprah The Lost Interview Part 2")
         for ch in '/\\:*?"<>|':
             self.assertNotIn(ch, slugify(f"a{ch}b"))
 
     def test_unicode_kept_control_stripped(self):
-        self.assertEqual(slugify("Beyoncé — Live"), "Beyoncé_—_Live")
-        self.assertEqual(slugify("a\x00\x1fb"), "a_b")
+        self.assertEqual(slugify("Beyoncé — Live"), "Beyoncé — Live")
+        self.assertEqual(slugify("a\x00\x1fb"), "a b")
+
+    def test_whitespace_runs_collapse(self):
+        self.assertEqual(slugify("a   b\t\tc"), "a b c")
+
+    def test_typed_underscores_survive(self):
+        self.assertEqual(slugify("my_clip_v2"), "my_clip_v2")
 
     def test_length_cap_and_fallback(self):
         self.assertLessEqual(len(slugify("x" * 500)), 64)
@@ -26,16 +34,24 @@ class SlugifyTests(unittest.TestCase):
 
 
 class TemplateTests(unittest.TestCase):
-    FIELDS = {"title": "Oprah_Interview", "id": "dQw4w9WgXcQ",
+    FIELDS = {"title": "Oprah Interview", "id": "dQw4w9WgXcQ", "n": 2,
               "start": "00.42", "end": "01.18", "date": "2026-08-11"}
 
-    def test_segment_template(self):
+    def test_clean_default_template(self):
+        self.assertEqual(render_template("{title} {n}", self.FIELDS),
+                         "Oprah Interview 2")
+
+    def test_legacy_underscore_template_still_works(self):
         name = render_template("{title}_{start}-{end}_{id}", self.FIELDS)
-        self.assertEqual(name, "Oprah_Interview_00.42-01.18_dQw4w9WgXcQ")
+        self.assertEqual(name, "Oprah Interview_00.42-01.18_dQw4w9WgXcQ")
+
+    def test_empty_n_leaves_no_trailing_debris(self):
+        fields = dict(self.FIELDS, n="")
+        self.assertEqual(render_template("{title} {n}", fields), "Oprah Interview")
 
     def test_unknown_tokens_vanish(self):
-        self.assertEqual(render_template("{title}_{nope}_{id}", self.FIELDS),
-                         "Oprah_Interview_dQw4w9WgXcQ")
+        self.assertEqual(render_template("{title} {nope} {id}", self.FIELDS),
+                         "Oprah Interview dQw4w9WgXcQ")
 
     def test_malformed_template_still_yields_name(self):
         self.assertTrue(render_template("{title", self.FIELDS))

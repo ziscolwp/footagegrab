@@ -3,7 +3,7 @@
 import json
 import logging
 
-from . import config, prefetch, system, timefmt
+from . import config, counters, prefetch, system, timefmt
 from .jobs import Job, RUNNING
 
 log = logging.getLogger("footagegrab.router")
@@ -81,6 +81,7 @@ class Router:
             "title": str(msg.get("title") or "")[:300],
             "site": prefetch.site_from_url(url),
             "source": str(msg.get("source") or "player")[:24],
+            "custom_name": str(msg.get("custom_name") or "").strip()[:80],
         }
         mode = msg.get("mode") or ("segments" if msg.get("segments") else "full")
         jobs = []
@@ -107,6 +108,15 @@ class Router:
                 jobs.append(job)
         else:
             raise AppError(f"unknown mode: {mode}")
+        # {n} is assigned here, in submission order, so part numbers always
+        # match the order the user marked/grabbed — worker scheduling can't
+        # reshuffle them. Counter key: video id, or the URL before prefetch.
+        cfg = config.load()
+        template = cfg.get("template_full") if mode == "full" else cfg.get("template_segment")
+        if "{n}" in str(template or ""):
+            key = common["video_id"] or url
+            for job in jobs:
+                job.n = counters.next_index(key)
         for job in jobs:
             self._queue.submit(job)
         return {"jobs": [j.to_dict() for j in jobs]}

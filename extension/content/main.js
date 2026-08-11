@@ -125,16 +125,33 @@
         const hint = d.in != null ? "Set Out first — press O" : "Set In first — press I";
         return window.FG.overlay.flash(hint, true);
       }
-      enqueue({ mode: "segments", segments: segments.map(s => ({ start: s.in, end: s.out })) },
-        segments.length);
+      withName(name => enqueue({
+        mode: "segments",
+        segments: segments.map(s => ({ start: s.in, end: s.out })),
+        custom_name: name,
+      }, segments.length));
     },
 
     grabFull() {
       const why = blocked();
       if (why) return window.FG.overlay.flash(why, true);
-      enqueue({ mode: "full" }, 0);
+      withName(name => enqueue({ mode: "full", custom_name: name }, 0));
     },
   };
+
+  // With "Ask for clip name" on, prompt first (Esc cancels the grab); the
+  // video title is prefilled so one keystroke replaces it.
+  function withName(fn) {
+    chrome.runtime.sendMessage({ cmd: "host", msg: { type: "get_config" } })
+      .then(res => {
+        if (res?.ok && res.config?.ask_names && window.FG.namer) {
+          window.FG.namer.ask(videoTitle(), name => { if (name !== null) fn(name); });
+        } else {
+          fn("");
+        }
+      })
+      .catch(() => fn(""));
+  }
 
   function enqueue(extra, count) {
     const payload = {

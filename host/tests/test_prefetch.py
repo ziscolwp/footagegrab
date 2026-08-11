@@ -173,7 +173,7 @@ class RunnerMetadataIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cfg = {"template_full": "{title}_{site}_{id}"}
             path = runner._plan_path(job, cfg, Path(td), "max")
-        self.assertEqual(path.name, "Great_Post_reddit_a1b2.mp4")
+        self.assertEqual(path.name, "Great Post_reddit_a1b2.mp4")
 
 
 if __name__ == "__main__":

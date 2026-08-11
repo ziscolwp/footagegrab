@@ -127,7 +127,8 @@ downloads anyway.
 | Premiere-safe H.264 | ON (default): VP9/AV1 downloads are converted to high-bitrate H.264 (50 Mbps at 4K) with the Mac's hardware encoder — a 4K clip converts in seconds on Apple Silicon. OFF: keep the original codec. |
 | Accurate cut | ON: re-encodes at the cuts so In/Out are frame-trustworthy. OFF: stream copy — starts/ends snap to keyframes (± a few seconds, fine for rough B-roll). |
 | Browser cookies | For age/member-restricted videos. macOS will prompt for keychain access. |
-| Filename templates | Clips: `{title}_{start}-{end}_{id}` → `Oprah_Interview_00.42-01.18_dQw4w9WgXcQ.mp4`. Tokens: `{title}` `{id}` `{site}` `{start}` `{end}` `{date}` `{quality}`. Collisions get `_2`, `_3`, … `{site}` is the lowercased extractor (`youtube`, `twitter`, `reddit`, `tiktok`); the v0.3 default full-video template is `{title}_{site}_{id}` (configs saved before v0.3 keep their stored template — update it in Settings if you want `{site}`). |
+| Ask for clip name | OFF by default. ON: every grab prompts for a name first (Enter grabs, Esc cancels, blank = automatic). Works on YouTube, the site buttons, the context menu, `⌥G`, and as an inline field in the popup. |
+| Filename templates | Default (both): `{title} {n}` → `Oprah Interview 1.mp4`, `Oprah Interview 2.mp4`, … — `{n}` counts grabs per video, in mark order, persisted across sessions, so part numbers tell you what you grabbed first. Tokens: `{title}` `{n}` `{id}` `{site}` `{start}` `{end}` `{date}` `{quality}`. Names keep spaces since v0.3.1 (the filename is the clip name in Premiere); collisions still get `_2`. |
 
 Config lives at `~/Library/Application Support/FootageGrab/config.json`;
 download history at `history.jsonl` next to it.

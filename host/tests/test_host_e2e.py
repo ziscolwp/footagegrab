@@ -112,11 +112,12 @@ class HostE2ETests(unittest.TestCase):
         for job in done_states.values():
             self.assertEqual(job["state"], "done", f"job failed: {job.get('error')}")
             self.assertTrue(Path(job["file"]).exists(), "output file must exist")
-            self.assertIn("Oprah_The_Interview", Path(job["file"]).name)
+            self.assertIn("Oprah The Interview", Path(job["file"]).name)
 
         names = sorted(Path(j["file"]).name for j in done_states.values())
         self.assertEqual(len(set(names)), 2, "segment files must not collide")
-        self.assertIn("00.42-01.18", names[0] + names[1])
+        # default template numbers parts per video, in mark order
+        self.assertEqual(names, ["Oprah The Interview 1.mp4", "Oprah The Interview 2.mp4"])
 
         # invalid enqueue is rejected with a human message, not a crash
         self.send({"id": 3, "type": "enqueue",

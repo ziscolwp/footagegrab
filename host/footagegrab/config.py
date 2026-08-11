@@ -18,8 +18,9 @@ DEFAULTS = {
     "accurate_cut": False,
     "compat_transcode": True,  # convert VP9/AV1 (all 4K+) to H.264 for Premiere
     "cookies_browser": "none",  # none | chrome | brave | chromium | edge
-    "template_segment": "{title}_{start}-{end}_{id}",
-    "template_full": "{title}_{site}_{id}",
+    "template_segment": "{title} {n}",
+    "template_full": "{title} {n}",
+    "ask_names": False,  # prompt for a clip name at grab time
     "max_concurrent": 2,
     "ytdlp_path": "",
     "ffmpeg_path": "",
@@ -101,7 +102,7 @@ def update(patch):
         if key == "cookies_browser" and value not in VALID_COOKIES:
             errors.append(f"cookies_browser must be one of {', '.join(VALID_COOKIES)}")
             continue
-        if key in ("accurate_cut", "compat_transcode"):
+        if key in ("accurate_cut", "compat_transcode", "ask_names"):
             value = bool(value)
         if key == "max_concurrent":
             try:

@@ -25,6 +25,8 @@
         <div class="grab-info">
           <div class="grab-label">Grab this page</div>
           <code id="grab-host" class="grab-host">—</code>
+          <input type="text" id="grab-name" placeholder="Clip name (optional)"
+                 spellcheck="false" hidden>
         </div>
         <button id="grab-page-btn" class="btn">Grab</button>
       </div>
@@ -107,6 +109,14 @@
 
     <section class="card">
       <div class="card-title">File names</div>
+      <div class="field field-row">
+        <div>
+          <label for="asknames-toggle">Ask for clip name</label>
+          <p class="hint">Every grab prompts for a name first — Enter grabs,
+          Esc cancels, blank keeps the automatic name.</p>
+        </div>
+        <input type="checkbox" id="asknames-toggle" class="switch">
+      </div>
       <div class="field">
         <label for="tpl-segment">Clips</label>
         <input type="text" id="tpl-segment" spellcheck="false">
@@ -117,8 +127,9 @@
         <input type="text" id="tpl-full" spellcheck="false">
         <code class="preview" id="tpl-full-preview"></code>
       </div>
-      <p class="hint">Tokens: <code>{title}</code> <code>{id}</code> <code>{site}</code>
-      <code>{start}</code> <code>{end}</code> <code>{date}</code> <code>{quality}</code></p>
+      <p class="hint">Tokens: <code>{title}</code> <code>{n}</code> <code>{id}</code>
+      <code>{site}</code> <code>{start}</code> <code>{end}</code> <code>{date}</code>
+      <code>{quality}</code> — <code>{n}</code> counts grabs per video (part 1, 2, 3…)</p>
     </section>
 
     <section class="card">

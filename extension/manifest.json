@@ -24,6 +24,7 @@
         "content/time.js",
         "content/state.js",
         "content/toasts.js",
+        "content/namer.js",
         "content/markers.js",
         "content/overlay.js",
         "content/hotkeys.js",
@@ -45,6 +46,7 @@
       "js": [
         "content/time.js",
         "content/toasts.js",
+        "content/namer.js",
         "content/sites/resolve.js",
         "content/sites/core.js",
         "content/sites/x.js",

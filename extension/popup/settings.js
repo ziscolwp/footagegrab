@@ -8,7 +8,7 @@ let saveTimer = null;
 const $ = id => document.getElementById(id);
 
 const PREVIEW_FIELDS = {
-  title: "Oprah_Interview", id: "dQw4w9WgXcQ", site: "youtube",
+  title: "Oprah Interview", id: "dQw4w9WgXcQ", site: "youtube", n: "2",
   start: "00.42", end: "01.18", date: "2026-08-11", quality: "best",
 };
 
@@ -47,6 +47,7 @@ export function paint() {
   }
   $("accurate-toggle").checked = !!config.accurate_cut;
   $("compat-toggle").checked = config.compat_transcode !== false;
+  $("asknames-toggle").checked = !!config.ask_names;
   $("cookies-select").value = config.cookies_browser || "none";
   if (document.activeElement !== $("tpl-segment")) $("tpl-segment").value = config.template_segment;
   if (document.activeElement !== $("tpl-full")) $("tpl-full").value = config.template_full;
@@ -89,6 +90,7 @@ export function wire() {
 
   $("accurate-toggle").addEventListener("change", e => patch({ accurate_cut: e.target.checked }));
   $("compat-toggle").addEventListener("change", e => patch({ compat_transcode: e.target.checked }));
+  $("asknames-toggle").addEventListener("change", e => patch({ ask_names: e.target.checked }));
   $("cookies-select").addEventListener("change", e => patch({ cookies_browser: e.target.value }));
 
   for (const [inputId, key, previewId] of [

@@ -77,6 +77,18 @@
       FG.toasts.show("error", "Couldn't resolve this post's link — try right-click → Grab video with FootageGrab");
       return;
     }
+    chrome.runtime.sendMessage({ cmd: "host", msg: { type: "get_config" } })
+      .then(res => {
+        if (res?.ok && res.config?.ask_names && FG.namer) {
+          FG.namer.ask("", name => { if (name !== null) send(url, btn, name); });
+        } else {
+          send(url, btn, "");
+        }
+      })
+      .catch(() => send(url, btn, ""));
+  }
+
+  function send(url, btn, customName) {
     btn.disabled = true;
     btn.textContent = "…";
     const reset = label => {
@@ -85,7 +97,7 @@
     };
     chrome.runtime.sendMessage({
       cmd: "host",
-      msg: { type: "enqueue", url, mode: "full", source: "adapter" },
+      msg: { type: "enqueue", url, mode: "full", source: "adapter", custom_name: customName },
     }).then(res => {
       if (res?.ok) {
         for (const j of res.jobs || []) initiated.add(j.id);

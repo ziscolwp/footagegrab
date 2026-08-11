@@ -229,6 +229,50 @@ button.fg-chip[data-act="out"].fg-set { border-color: var(--fg-out); }
 
 /* ---- toasts ---- */
 
+/* ---- grab-time naming prompt ---- */
+
+.fg-namer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  background: rgba(0, 0, 0, 0.35);
+}
+.fg-namer-card {
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  width: 340px;
+  display: grid;
+  gap: 8px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.fg-namer-label {
+  font: 700 13px/1 Roboto, Arial, sans-serif;
+  color: var(--fg-text);
+}
+.fg-namer-input {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--fg-line);
+  border-radius: 8px;
+  color: var(--fg-text);
+  font: 500 13px/1.4 Roboto, Arial, sans-serif;
+  padding: 8px 10px;
+  width: 100%;
+  outline: none;
+}
+.fg-namer-input:focus { border-color: var(--fg-in); }
+.fg-namer-hint {
+  font: 400 11px/1 Roboto, Arial, sans-serif;
+  color: var(--fg-dim);
+}
+
 .fg-toasts {
   position: absolute;
   right: 12px;

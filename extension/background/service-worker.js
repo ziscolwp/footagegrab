@@ -93,17 +93,34 @@ function pickGrabUrl(info, tab) {
   return null;
 }
 
-async function grabUrl(url, source, tabId) {
+async function grabUrl(url, source, tabId, customName = "") {
   if (!url) {
     flashInTab(tabId, false, "Nothing grabbable here");
     return;
   }
   try {
-    const res = await hostRequest({ type: "enqueue", url, mode: "full", source });
+    const res = await hostRequest({ type: "enqueue", url, mode: "full", source, custom_name: customName });
     if (res?.ok) flashInTab(tabId, true, "Queued — grabbing video");
     else flashInTab(tabId, false, res?.error || "Could not queue the grab");
   } catch (e) {
     flashInTab(tabId, false, e.message);
+  }
+}
+
+// "Ask for clip name" for pages without our content script: a plain injected
+// prompt. Returns "" (auto name), a name, or null when the user cancels.
+async function maybeAskName(tabId) {
+  try {
+    const cfg = await hostRequest({ type: "get_config" });
+    if (!cfg?.ok || !cfg.config?.ask_names || tabId == null) return "";
+    const [hit] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.prompt("FootageGrab — name this clip (blank = automatic):", ""),
+    });
+    if (hit?.result === null) return null;
+    return (hit?.result || "").trim();
+  } catch (e) {
+    return ""; // restricted page — grab with the automatic name
   }
 }
 
@@ -139,15 +156,21 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "fg-grab") return;
-  grabUrl(pickGrabUrl(info, tab), "context_menu", tab?.id);
+  const url = pickGrabUrl(info, tab);
+  const name = await maybeAskName(tab?.id);
+  if (name === null) return; // user cancelled the prompt
+  grabUrl(url, "context_menu", tab?.id, name);
 });
 
 chrome.commands.onCommand.addListener(async command => {
   if (command !== "grab-page") return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && tab.url && /^https?:\/\//i.test(tab.url)) grabUrl(tab.url, "shortcut", tab.id);
+  if (!tab?.url || !/^https?:\/\//i.test(tab.url)) return;
+  const name = await maybeAskName(tab.id);
+  if (name === null) return;
+  grabUrl(tab.url, "shortcut", tab.id, name);
 });
 
 function updateBadge() {
