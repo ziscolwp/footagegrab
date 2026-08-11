@@ -1,7 +1,7 @@
-# BUILD_NOTES — FootageGrab v0.1.0
+# BUILD_NOTES — FootageGrab
 
 Handoff notes: what was built, why it's shaped this way, what was verified
-live, and where it can break.
+live, and where it can break. v0.1/v0.2 notes first, v0.3 at the end.
 
 ## Architecture
 
@@ -113,25 +113,134 @@ are centralized for quick repair (below).
 
 ## Deferred (agreed scope)
 
-- **v1.5 — Premiere auto-import**: UXP panel with a watch folder + "Import new
-  into bin". Note: this machine already has a Premiere MCP with
-  `import_folder` — a stopgap is asking Claude to import the footage folder
-  into a bin until the panel exists.
+- ~~v1.5 — Premiere auto-import~~ → **shipped in v0.3** as the CEP Bridge
+  panel (below). The MCP stopgap is retired — the user rejected any
+  AI-in-the-loop import.
 - **v2**: session/project profiles, history search + re-download, metadata
   sidecar JSON, ClipDeck `footage`-source deep-links, denser keyboard-first
-  mode (yt_clipper-style) if it stays learnable.
+  mode (yt_clipper-style) if it stays learnable, trim UI for non-YouTube
+  sites (v0.4+), invisible auto-start CEP extension so the panel needn't be
+  open.
 - Windows support (paths + manifest registry locations differ; host logic is
   already platform-guarded).
+
+---
+
+# v0.3 — Premiere auto-import (CEP Bridge) + one-click multi-site grabs
+
+Built 2026-08-11 against HANDOFF-v0.3.md. User decisions locked at session
+start: single `FootageGrab` bin · adapters for X/Reddit/TikTok **+ Instagram**
+· ~2s quick-dismiss toasts for one-click grabs · nothing to copy from
+SmartGrab beyond the speed.
+
+## Architecture added
+
+```
+premiere/                       CEP panel "FootageGrab Bridge" (PPRO 23–99)
+  CSXS/manifest.xml             --enable-nodejs --mixed-context, CSXS 9.0
+  index.html + css/panel.css    popup design language, Premiere-dark bg
+  js/watchcore.js               PURE watcher logic (node --test'able)
+  js/panel.js                   2s poll loop, config re-read, dedupe, JSX calls
+  js/CSInterface.js             Adobe v9.4.0, vendored from DropComp
+  jsx/import.jsx                ensureBin + batched importFiles, hand-rolled JSON
+install/install-premiere.sh     copy (or --link) + PlayerDebugMode 10/11/12
+extension/content/sites/        resolve.js (pure) · core.js (button engine)
+                                x.js · reddit.js · tiktok.js · instagram.js
+host/footagegrab/prefetch.py    --print metadata prefetch · site tokens · hints
+```
+
+## Decisions and why (v0.3)
+
+- **Poll `readdir` every 2s; `fs.watch` only accelerates.** The user's
+  projects live on external volumes where FSEvents is unreliable; polling one
+  directory at 2s is free. The panel re-reads the extension's `config.json`
+  every tick, so changing the folder in the popup retargets the panel with no
+  UI coupling.
+- **Readiness gate = known video extension, no `.part/.ytdl/.h264tmp` marker,
+  non-zero size stable across two consecutive ticks.** The host renames
+  transcodes into place atomically, but manual Finder drops are not.
+- **Dedupe is two-layered and failure-safe**: a localStorage set of
+  `path|size|mtime` keys (mtime in the key so a re-download re-imports after
+  the user deletes the project item), plus an ExtendScript walk comparing
+  `getMediaPath()` against the live project. Keys are recorded **only after
+  JSX reports success**, so a mid-write import attempt can't poison dedupe.
+- **`require` vs `cep_node.require`**: with `--mixed-context` Node merges
+  into the page — DropComp (proven daily on this machine) uses bare
+  `require`. The panel tries bare `require` first, `cep_node` as fallback.
+- **JSX returns hand-rolled JSON strings** — ExtendScript's native JSON
+  support varies by host version and the payloads are flat; a polyfill would
+  be more code than the emitter.
+- **Prefetch lives in the worker, not the enqueue handler.** Enqueue must
+  answer the extension within its 15s timeout; `yt-dlp --print` (~2–8s, 20s
+  cap) runs as the job's first stage ("fetching info") instead. Prefetch
+  failure never fails a job — naming falls back to `{site}_{date}`.
+- **`{site}` = lowercased extractor key** when prefetch runs, hostname-derived
+  otherwise (`x.com → twitter`, `youtu.be → youtube`, `v.redd.it → reddit`).
+  New default full template `{title}_{site}_{id}` — stored configs keep their
+  old template until edited (config.load only honors stored keys).
+- **Adapters are expendable by contract**: ≤80 lines each, selectors
+  documented at the top of each file, generic surfaces (context menu, `⌥G`,
+  popup row) as the permanent fallback. Buttons mount on the container's
+  *parent* because custom elements (`shreddit-player`) and `<video>` don't
+  render light-DOM children.
+- **Injected ack toast** (`chrome.scripting.executeScript`) for context-menu
+  and shortcut grabs — works on pages with no content script at all.
+
+## Verified live (2026-08-11, macOS 26.5, yt-dlp 2026.07.04, Premiere Pro 2026)
+
+1. **68/68 host tests** (`python3 -m unittest discover -s host/tests`) — 46
+   existing + 22 new (prefetch parse/site/hints/subprocess incl. timeout, and
+   runner integration: prefetch fills job, skip-when-present, failure-safe,
+   `{site}` + `site_date` naming).
+2. **28/28 node tests** — watchcore readiness/dedupe/prune (11), adapter
+   permalink resolvers with captured href fixtures (14), time (3). All JS
+   passes `node --check`; both manifests parse.
+3. **X full chain, real network**: bare URL enqueued exactly like a
+   context-menu grab (no title/id) → prefetch stage fired → download →
+   `SpaceX_-_Liftoff!_twitter_2084909824358096896.mp4`, h264 1280×720 —
+   **4.2s URL-to-file**, no transcode needed (X serves H.264, as expected).
+4. **Error surfacing**: a no-video tweet returns yt-dlp's verbatim
+   `No video could be found in this tweet`; login-walled errors get the
+   "Enable Browser cookies" hint appended (unit-tested).
+5. **Impersonation**: Homebrew yt-dlp shipped **without** curl_cffi (spec
+   assumed bundled — false on this machine); installed `curl_cffi==0.13.0`
+   into its venv (0.16 is rejected by yt-dlp 2026.07.04). Chrome-133/136
+   targets now available.
+6. **Panel installed** to `~/Library/Application Support/Adobe/CEP/extensions/
+   FootageGrabBridge`; PlayerDebugMode already set (CSXS 11/12) + written for
+   10; Premiere 2026 present and CEP-healthy (MCP bridge answered ready).
+
+Not verified live yet (needs a Premiere restart + the panel docked once):
+drop-file→bin ≤2s, catch-up scan, external-volume watch. TikTok/Instagram
+live grabs untestable from this network (TikTok geo-blocked in India;
+Instagram login-walled — cookies path exists). Reddit video grab not
+exercised (WAF throttled URL discovery, extractor itself verified resolving
+post URLs); the code path is identical to the verified X chain.
+
+## Known risks & limitations (v0.3)
+
+- **Adapter DOM churn**: X/TikTok/Instagram redesign constantly. Selectors
+  are one-place-per-file; context menu + `⌥G` are the permanent fallback.
+- **Panel only watches while open** — accepted; catch-up covers gaps.
+- **TikTok from India needs a VPN** — network-level, not code.
+- **`<all_urls>` host permission** — required for grab-anywhere; private
+  unpacked extension, documented in README.
+- **curl_cffi pin** — `brew upgrade yt-dlp` may drop or outgrow the venv's
+  curl_cffi; re-pin `curl_cffi==0.13.0` (or whatever the new yt-dlp accepts)
+  if impersonation targets vanish.
 
 ## Dev quickstart
 
 ```bash
 python3 -m unittest discover -s host/tests -v
-node --test extension/tests/time.test.js
+node --test extension/tests/time.test.js extension/tests/resolve.test.js \
+  premiere/tests/watchcore.test.js
 python3 host/selftest.py                 # health
 python3 host/selftest.py --roundtrip     # spawn host, speak the protocol
-./install/install.sh                     # (re)install + self-test
+./install/install.sh                     # (re)install host + self-test
+./install/install-premiere.sh            # (re)install CEP panel (--link: dev)
 ```
 
-No build step anywhere: `extension/` loads unpacked as-is; the host runs on
-stock python3. Files stay under 400 lines by design.
+No build step anywhere: `extension/` and `premiere/` load as-is; the host
+runs on stock python3. Files stay under 400 lines by design (CSInterface.js
+is vendored and exempt).
