@@ -1,0 +1,4 @@
+# Windows scripts must check out with CRLF — cmd.exe mishandles LF-only
+# batch files in edge cases, and Notepad-edited diffs stay clean.
+*.bat text eol=crlf
+*.ps1 text eol=crlf

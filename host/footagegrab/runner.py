@@ -127,7 +127,7 @@ class DownloadRunner:
         if on_progress:
             on_progress(0.0, "transcoding")
         dst = path.with_name(path.stem + ".h264tmp.mp4")
-        for encoder in ("h264_videotoolbox", "libx264"):
+        for encoder in compat.encoder_candidates():
             argv = compat.build_transcode_args(
                 ffmpeg, path, dst,
                 height=info["height"], acodec=info["acodec"], encoder=encoder,

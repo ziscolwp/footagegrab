@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULTS = {
-    "output_dir": "~/Movies/FootageGrab",
+    "output_dir": "~/Movies/FootageGrab" if sys.platform == "darwin" else "~/Videos/FootageGrab",
     "quality": "max",  # max | 1080 | 720  ("best" is a legacy alias for max)
     "accurate_cut": False,
     "compat_transcode": True,  # convert VP9/AV1 (all 4K+) to H.264 for Premiere
@@ -28,7 +28,16 @@ DEFAULTS = {
 
 VALID_QUALITY = ("max", "1080", "720", "best")
 VALID_COOKIES = ("none", "chrome", "brave", "chromium", "edge")
-EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
+if sys.platform == "win32":
+    # winget/scoop/chocolatey shims — Chrome passes the user PATH on Windows,
+    # but freshly-installed tools may predate the current session's PATH.
+    EXTRA_PATH = tuple(p for p in (
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links"),
+        os.path.expandvars(r"%USERPROFILE%\scoop\shims"),
+        r"C:\ProgramData\chocolatey\bin",
+    ) if "%" not in p)
+else:
+    EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
 
 
 def app_home():
@@ -37,6 +46,10 @@ def app_home():
         home = Path(override)
     elif sys.platform == "darwin":
         home = Path.home() / "Library" / "Application Support" / "FootageGrab"
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        home = base / "FootageGrab"
     else:
         home = Path.home() / ".config" / "footagegrab"
     home.mkdir(parents=True, exist_ok=True)

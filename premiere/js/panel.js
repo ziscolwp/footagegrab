@@ -66,8 +66,13 @@
 
   // ---- folder resolution ------------------------------------------------
 
-  var CONFIG_PATH = (os ? os.homedir() : "~") +
-    "/Library/Application Support/FootageGrab/config.json";
+  var IS_WIN = typeof process !== "undefined" && process.platform === "win32";
+  var APP_HOME = IS_WIN
+    ? ((typeof process !== "undefined" && process.env.APPDATA) ||
+       (os ? os.homedir() + "/AppData/Roaming" : "~")) + "/FootageGrab"
+    : (os ? os.homedir() : "~") + "/Library/Application Support/FootageGrab";
+  var CONFIG_PATH = APP_HOME + "/config.json";
+  var DEFAULT_DIR = IS_WIN ? "~/Videos/FootageGrab" : "~/Movies/FootageGrab";
 
   function expandTilde(p) {
     if (p && p.indexOf("~") === 0 && os) return os.homedir() + p.slice(1);
@@ -82,7 +87,7 @@
       var cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
       if (cfg && cfg.output_dir) return expandTilde(String(cfg.output_dir));
     } catch (e) { /* no config yet — fall through */ }
-    return expandTilde("~/Movies/FootageGrab");
+    return expandTilde(DEFAULT_DIR);
   }
 
   // ---- watcher ----------------------------------------------------------

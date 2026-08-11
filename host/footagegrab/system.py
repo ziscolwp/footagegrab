@@ -1,4 +1,5 @@
-"""macOS integration: Finder reveal, native folder picker, tool health, updates."""
+"""OS integration: file-manager reveal, native folder picker, tool health,
+updates. macOS uses open/osascript; Windows uses explorer/PowerShell."""
 
 import subprocess
 import sys
@@ -12,41 +13,70 @@ def _run(argv, timeout):
 
 
 def reveal(path):
-    """Reveal a file in Finder. Returns (ok, error)."""
+    """Reveal a file in Finder / Explorer. Returns (ok, error)."""
     p = Path(str(path)).expanduser()
     if not p.exists():
         return False, f"file no longer exists: {p}"
-    if sys.platform != "darwin":
-        return False, "reveal is only supported on macOS"
-    _run(["open", "-R", str(p)], timeout=10)
-    return True, ""
+    if sys.platform == "darwin":
+        _run(["open", "-R", str(p)], timeout=10)
+        return True, ""
+    if sys.platform == "win32":
+        # explorer exits non-zero even on success — fire and forget
+        subprocess.Popen(["explorer", f"/select,{p}"])
+        return True, ""
+    return False, "reveal is not supported on this platform"
 
 
 def open_folder(path):
     p = Path(str(path)).expanduser()
     if not p.is_dir():
         return False, f"folder does not exist: {p}"
-    if sys.platform != "darwin":
-        return False, "open is only supported on macOS"
-    _run(["open", str(p)], timeout=10)
-    return True, ""
+    if sys.platform == "darwin":
+        _run(["open", str(p)], timeout=10)
+        return True, ""
+    if sys.platform == "win32":
+        import os
+        os.startfile(str(p))  # noqa: S606 — opening the user's own folder
+        return True, ""
+    return False, "open is not supported on this platform"
+
+
+_PS_PICKER = """
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = 'Choose your FootageGrab footage folder'
+$d.ShowNewFolderButton = $true
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($d.SelectedPath)
+}
+"""
 
 
 def choose_folder(prompt="Choose your FootageGrab footage folder"):
-    """Native folder picker via osascript. Returns (path | None, error)."""
-    if sys.platform != "darwin":
-        return None, "folder picker is only supported on macOS"
-    script = f'POSIX path of (choose folder with prompt "{prompt}")'
-    try:
-        proc = _run(["osascript", "-e", script], timeout=240)
-    except subprocess.TimeoutExpired:
-        return None, "folder picker timed out"
-    if proc.returncode == 0:
-        path = proc.stdout.strip()
-        return (path, "") if path else (None, "no folder returned")
-    if "User canceled" in (proc.stderr or ""):
+    """Native folder picker. Returns (path | None, error)."""
+    if sys.platform == "darwin":
+        script = f'POSIX path of (choose folder with prompt "{prompt}")'
+        try:
+            proc = _run(["osascript", "-e", script], timeout=240)
+        except subprocess.TimeoutExpired:
+            return None, "folder picker timed out"
+        if proc.returncode == 0:
+            path = proc.stdout.strip()
+            return (path, "") if path else (None, "no folder returned")
+        if "User canceled" in (proc.stderr or ""):
+            return None, "canceled"
+        return None, (proc.stderr or "folder picker failed").strip()[:200]
+    if sys.platform == "win32":
+        try:
+            proc = _run(["powershell", "-NoProfile", "-STA", "-Command", _PS_PICKER],
+                        timeout=240)
+        except (subprocess.TimeoutExpired, OSError):
+            return None, "folder picker timed out"
+        path = (proc.stdout or "").strip()
+        if proc.returncode == 0 and path:
+            return path, ""
         return None, "canceled"
-    return None, (proc.stderr or "folder picker failed").strip()[:200]
+    return None, "folder picker is not supported on this platform"
 
 
 def tool_version(path, flag="--version"):
@@ -79,7 +109,7 @@ def health(cfg):
 
 
 def update_ytdlp(cfg):
-    """Run yt-dlp -U. Homebrew installs refuse -U; surface the brew command."""
+    """Run yt-dlp -U. Package-manager installs refuse -U; surface the command."""
     ytdlp = config.resolve_tool("yt-dlp", cfg.get("ytdlp_path"))
     if not ytdlp:
         return {"ok": False, "output": "yt-dlp not found"}
@@ -90,4 +120,6 @@ def update_ytdlp(cfg):
     output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
     if "brew" in output.lower() or "/opt/homebrew" in ytdlp:
         output += "\n\nHomebrew install detected — update with: brew upgrade yt-dlp"
+    elif sys.platform == "win32" and proc.returncode != 0:
+        output += "\n\nIf installed with winget, update with: winget upgrade yt-dlp"
     return {"ok": proc.returncode == 0, "output": output[-800:]}

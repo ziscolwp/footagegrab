@@ -16,11 +16,15 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 - A CEP panel ("FootageGrab Bridge") watches the footage folder from inside
   Premiere and auto-imports new files into a bin within ~2 seconds.
 - Single-user, fully local. No cloud, no accounts, no tracking.
-- macOS first.
+- macOS and Windows.
 
 > **Legal:** you are responsible for having the rights to any footage you
 > download. Personal offline production use only — this tool has no
 > redistribution features and does not touch DRM.
+
+> **Legal reminder for anyone installing this:** you are responsible for
+> having the rights to footage you download. Personal offline production use
+> only.
 
 ## Install (macOS)
 
@@ -66,6 +70,39 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 > access so the context menu / `⌥G` / site buttons work everywhere. It is a
 > private unpacked extension — nothing leaves your machine. After pulling an
 > update, hit **Reload** on `chrome://extensions`.
+
+## Install (Windows)
+
+1. **Python 3** — [python.org/downloads](https://www.python.org/downloads/),
+   and tick **"Add python.exe to PATH"** in the installer.
+
+2. **Dependencies** (in a terminal — press Win, type `cmd`, Enter):
+
+   ```
+   winget install yt-dlp
+   winget install ffmpeg
+   ```
+
+3. **Download this project**: green **Code** button above → **Download ZIP**
+   → unzip somewhere permanent (e.g. `Documents\FootageGrab`). Don't move it
+   afterwards — or re-run the installer if you do.
+
+4. **Native host** — double-click `install\install.bat`. It registers the
+   host with Chrome/Edge/Brave (current user, no admin) and runs a self-test.
+
+5. **Extension**: open `chrome://extensions`, enable **Developer mode**,
+   **Load unpacked** → select the `extension` folder. Then fully close and
+   reopen the browser.
+
+6. **Premiere panel**: double-click `install\install-premiere.bat`, restart
+   Premiere, open **Window → Extensions → FootageGrab Bridge**.
+
+7. Click the FootageGrab toolbar icon → **Settings** → **Choose folder…**.
+
+Windows notes: the Premiere-safe H.264 conversion uses NVENC on NVIDIA GPUs
+and falls back to CPU x264 (slower than the Mac hardware path, same quality).
+`install\uninstall.bat` removes the registrations. On grabs failing with
+"Sign in…" errors, enable Browser cookies in Settings, same as macOS.
 
 ## Use
 

@@ -121,8 +121,14 @@ are centralized for quick repair (below).
   mode (yt_clipper-style) if it stays learnable, trim UI for non-YouTube
   sites (v0.4+), invisible auto-start CEP extension so the panel needn't be
   open.
-- Windows support (paths + manifest registry locations differ; host logic is
-  already platform-guarded).
+- ~~Windows support~~ → **code-complete since v0.3.2**: %APPDATA% paths,
+  O_BINARY stdio (CRT text-mode mangles native messaging framing), Explorer
+  reveal + PowerShell folder picker, NVENC→x264 encoder ladder, registry-based
+  native messaging registration (install.bat/ps1) and CEP install
+  (install-premiere.bat), panel config path per-platform. Validated on macOS
+  via pwsh parse + dry-run of the installer logic and platform-patched unit
+  tests — **not yet exercised on a real Windows machine**; first Windows user
+  is the live test.
 
 ---
 

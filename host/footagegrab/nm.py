@@ -14,6 +14,12 @@ class NativeMessagingIO:
     """Blocking reader / thread-safe writer over the stdio pipes Chrome gives us."""
 
     def __init__(self, stdin=None, stdout=None):
+        if stdin is None and stdout is None and sys.platform == "win32":
+            # Windows CRT text mode mangles \n in the binary framing
+            import msvcrt
+            import os
+            msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+            msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
         self._in = stdin if stdin is not None else sys.stdin.buffer
         self._out = stdout if stdout is not None else sys.stdout.buffer
         self._write_lock = threading.Lock()

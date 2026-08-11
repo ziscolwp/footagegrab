@@ -1,14 +1,15 @@
 """Premiere compatibility: probe codecs, transcode non-H.264 downloads.
 
 YouTube serves 4K+ only as VP9/AV1, which Premiere can't read reliably. After
-a max-quality download we re-encode to H.264 with the Mac's hardware encoder
-(VideoToolbox — fast, near-lossless at these bitrates), falling back to
-libx264 if hardware encoding is unavailable.
+a max-quality download we re-encode to H.264 with the platform's hardware
+encoder (VideoToolbox on macOS, NVENC on Windows when present), falling back
+to libx264 if hardware encoding is unavailable.
 """
 
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 # Codecs Premiere imports without drama. HEVC would qualify but YouTube never
@@ -16,11 +17,23 @@ from pathlib import Path
 SAFE_VCODECS = frozenset({"h264"})
 
 
+def encoder_candidates(platform=None):
+    """Encoders to try in order; a failed attempt falls through cleanly."""
+    platform = platform or sys.platform
+    if platform == "darwin":
+        return ("h264_videotoolbox", "libx264")
+    if platform == "win32":
+        return ("h264_nvenc", "libx264")  # NVENC errors instantly without NVIDIA
+    return ("libx264",)
+
+
 def find_ffprobe(ffmpeg_path):
     """ffprobe ships next to ffmpeg; prefer the sibling, then PATH."""
-    sibling = Path(str(ffmpeg_path)).parent / "ffprobe"
-    if sibling.is_file():
-        return str(sibling)
+    parent = Path(str(ffmpeg_path)).parent
+    for name in ("ffprobe", "ffprobe.exe"):
+        sibling = parent / name
+        if sibling.is_file():
+            return str(sibling)
     return shutil.which("ffprobe")
 
 
@@ -67,8 +80,8 @@ def build_transcode_args(ffmpeg, src, dst, *, height, acodec, encoder="h264_vide
         "-nostats", "-progress", "pipe:1",
         "-i", str(src),
     ]
-    if encoder == "h264_videotoolbox":
-        argv += ["-c:v", "h264_videotoolbox", "-b:v", bitrate_for_height(height),
+    if encoder in ("h264_videotoolbox", "h264_nvenc"):
+        argv += ["-c:v", encoder, "-b:v", bitrate_for_height(height),
                  "-profile:v", "high"]
     else:
         argv += ["-c:v", "libx264", "-crf", "18", "-preset", "fast"]
