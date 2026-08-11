@@ -231,6 +231,10 @@ button.fg-chip[data-act="out"].fg-set { border-color: var(--fg-out); }
 
 /* ---- grab-time naming prompt ---- */
 
+/* host pages (YouTube etc.) don't reset box-sizing — without this the
+   input's width:100% + padding overflows the card */
+.fg-namer, .fg-namer * { box-sizing: border-box; }
+
 .fg-namer {
   position: fixed;
   inset: 0;
@@ -246,7 +250,8 @@ button.fg-chip[data-act="out"].fg-set { border-color: var(--fg-out); }
   border: 1px solid var(--fg-line);
   border-radius: 12px;
   padding: 14px 16px;
-  width: 340px;
+  width: 380px;
+  max-width: calc(100vw - 40px);
   display: grid;
   gap: 8px;
   backdrop-filter: blur(10px);
