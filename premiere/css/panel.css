@@ -128,6 +128,7 @@ input[type="text"]:focus { outline: 1px solid var(--in); }
 }
 .import-name {
   flex: 1;
+  min-width: 0; /* same flex-ellipsis trap as the popup job titles */
   font: 500 11px/1.4 var(--mono);
   white-space: nowrap;
   overflow: hidden;

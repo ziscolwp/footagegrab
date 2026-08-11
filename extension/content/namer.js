@@ -47,7 +47,10 @@
 
     document.body.appendChild(box);
     input.focus();
-    input.select(); // typing replaces the suggestion in one keystroke
+    // select all (one keystroke replaces the suggestion) but anchor the view
+    // at the START of the title — plain select() scrolls to the end
+    input.setSelectionRange(0, input.value.length, "backward");
+    input.scrollLeft = 0;
   }
 
   window.FG.namer = { ask };
