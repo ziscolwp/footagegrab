@@ -1,0 +1,327 @@
+/* FootageGrab in-player chrome.
+   Design language: NLE timeline grammar on YouTube's scrubber — bracket In/Out
+   flags, a green→amber selection band, monospace timecode readouts. Dark,
+   compact, native to the player. */
+
+:root {
+  --fg-in: #17c964;
+  --fg-out: #f5a524;
+  --fg-surface: rgba(16, 16, 18, 0.88);
+  --fg-line: rgba(255, 255, 255, 0.12);
+  --fg-text: #f2f2f0;
+  --fg-dim: #a6a6a2;
+  --fg-danger: #ff5c77;
+  --fg-mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+/* ---- marker layer on the progress bar ---- */
+
+.fg-marker-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+.fg-range {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  background: linear-gradient(90deg, rgba(23, 201, 100, 0.45), rgba(245, 165, 36, 0.45));
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+}
+.fg-range.fg-staged { opacity: 0.55; }
+
+.fg-handle {
+  position: absolute;
+  bottom: -2px;
+  width: 14px;
+  height: 20px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  z-index: 61;
+}
+.fg-handle.fg-staged { opacity: 0.6; }
+
+/* In flag: “[” bracket — vertical bar with a stub pointing right */
+.fg-handle-in { transform: translateX(-2px); }
+.fg-handle-in::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--fg-in);
+  border-radius: 1px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+}
+.fg-handle-in::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0;
+  width: 9px; height: 3px;
+  background: var(--fg-in);
+  border-radius: 1px;
+}
+
+/* Out flag: “]” bracket — mirrored */
+.fg-handle-out { transform: translateX(-12px); }
+.fg-handle-out::before {
+  content: "";
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--fg-out);
+  border-radius: 1px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+}
+.fg-handle-out::after {
+  content: "";
+  position: absolute;
+  right: 0; top: 0;
+  width: 9px; height: 3px;
+  background: var(--fg-out);
+  border-radius: 1px;
+}
+
+.fg-handle:hover::before { filter: brightness(1.25); }
+body.fg-dragging { user-select: none; }
+
+/* ---- the pill ---- */
+
+.fg-pill {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 62;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font: 500 12px/1 Roboto, Arial, sans-serif;
+  color: var(--fg-text);
+  transition: opacity 0.18s ease;
+}
+.html5-video-player.ytp-autohide .fg-pill {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fg-logo {
+  font: 800 10px/1 Roboto, Arial, sans-serif;
+  letter-spacing: 0.5px;
+  color: #0d0d0f;
+  background: linear-gradient(135deg, var(--fg-in), #10a34e);
+  border-radius: 5px;
+  padding: 4px 5px;
+  user-select: none;
+}
+
+.fg-chip {
+  font: 600 11px/1 var(--fg-mono);
+  letter-spacing: 0.2px;
+  color: var(--fg-dim);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 7px;
+  cursor: pointer;
+  min-width: 34px;
+}
+.fg-chip:hover { background: rgba(255, 255, 255, 0.12); color: var(--fg-text); }
+.fg-chip.fg-set { color: var(--fg-text); }
+.fg-chip.fg-set:nth-of-type(1),
+button.fg-chip[data-act="in"].fg-set { border-color: var(--fg-in); }
+button.fg-chip[data-act="out"].fg-set { border-color: var(--fg-out); }
+
+.fg-readout {
+  font: 600 11px/1 var(--fg-mono);
+  color: var(--fg-dim);
+  padding: 0 2px;
+  white-space: nowrap;
+}
+
+.fg-btn {
+  font: 600 11.5px/1 Roboto, Arial, sans-serif;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--fg-text);
+}
+.fg-btn-grab {
+  background: var(--fg-in);
+  color: #08160d;
+}
+.fg-btn-grab:hover { filter: brightness(1.1); }
+.fg-btn-grab:disabled {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--fg-dim);
+  cursor: default;
+}
+.fg-btn-ghost {
+  background: rgba(255, 255, 255, 0.08);
+}
+.fg-btn-ghost:hover { background: rgba(255, 255, 255, 0.16); }
+.fg-btn-icon {
+  background: transparent;
+  color: var(--fg-dim);
+  padding: 6px 6px;
+}
+.fg-btn-icon:hover { color: var(--fg-text); }
+
+.fg-shake { animation: fg-shake 0.3s ease; }
+@keyframes fg-shake {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.fg-msg {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: 500 12px/1.3 Roboto, Arial, sans-serif;
+  color: var(--fg-text);
+  white-space: nowrap;
+}
+.fg-msg-error { color: var(--fg-danger); border-color: rgba(255, 92, 119, 0.4); }
+
+.fg-cheat {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.fg-cheat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 12px/1.2 Roboto, Arial, sans-serif;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.fg-cheat-row kbd,
+.fg-coach kbd {
+  font: 600 10.5px/1 var(--fg-mono);
+  color: var(--fg-text);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--fg-line);
+  border-radius: 4px;
+  padding: 3px 5px;
+  min-width: 30px;
+  text-align: center;
+}
+
+/* ---- toasts ---- */
+
+.fg-toasts {
+  position: absolute;
+  right: 12px;
+  bottom: 64px;
+  z-index: 62;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  pointer-events: none;
+}
+
+.fg-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: 400 12px/1.35 Roboto, Arial, sans-serif;
+  color: var(--fg-text);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fg-rise 0.16s ease-out;
+}
+@keyframes fg-rise {
+  from { transform: translateY(6px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fg-toast { animation: none; }
+  .fg-shake { animation: none; }
+}
+
+.fg-toast-error { border-color: rgba(255, 92, 119, 0.45); }
+.fg-toast-body { min-width: 0; flex: 1; }
+.fg-toast-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.fg-job-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fg-job-meta {
+  font: 500 11px/1.4 var(--fg-mono);
+  color: var(--fg-dim);
+}
+.fg-job-status { margin-top: 3px; color: var(--fg-dim); }
+.fg-job-status.fg-ok { color: var(--fg-in); }
+.fg-job-status.fg-err { color: var(--fg-danger); }
+
+.fg-bar {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.fg-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--fg-in), var(--fg-out));
+  transition: width 0.3s ease;
+}
+.fg-bar-indeterminate .fg-bar-fill {
+  width: 35%;
+  animation: fg-slide 1.2s ease-in-out infinite;
+}
+@keyframes fg-slide {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+/* ---- first-run coach ---- */
+
+.fg-coach {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  z-index: 63;
+  width: 340px;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font: 400 13px/1.45 Roboto, Arial, sans-serif;
+  color: var(--fg-text);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.fg-coach-title { font-weight: 700; margin-bottom: 4px; }
+.fg-coach-body { color: var(--fg-dim); margin-bottom: 10px; }

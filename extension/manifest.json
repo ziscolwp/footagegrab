@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "FootageGrab",
+  "version": "0.1.0",
+  "description": "Mark In/Out on YouTube and grab clips straight into your Premiere footage folder.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoLrA5gd4AmLRf5PCm4mHSV8kHUQ+m8IKKq9A0WaCOc2TQOiZkSRI7jwjS1F4v592a8BcTiBxhmPGKtT0xV77ofwpfmYXD/3aXP1DcGi9L0R1+ryAU0EaoKJwxVeZtI6BUcI1B8RPG4GZu+cRMaVGNVKMjsjlb/lycIL12DzX4Gy7Y0s1Dr55FbYDhsmSdKgBGYyRtUTvQxgaFVgpZ+pGZDRK0pBi2HZNyJfMz5hRl+ShaWMBzTllXjmmMbtpGeKpJDL6CYk34Q12xvlWHZX3ses7opySzYto6KnOZLY/jF8dUw/zdZVdFrQAbh9INgz+W0mZi1hkpISvA6ZXknVu5wIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["nativeMessaging", "storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": [
+        "content/time.js",
+        "content/state.js",
+        "content/toasts.js",
+        "content/markers.js",
+        "content/overlay.js",
+        "content/hotkeys.js",
+        "content/main.js"
+      ],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

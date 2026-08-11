@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FootageGrab</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="hdr">
+    <div class="brand">Footage<b>Grab</b></div>
+    <div class="host-status" id="host-status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Connecting…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="queue" role="tab">Queue</button>
+    <button class="tab" data-tab="settings" role="tab">Settings</button>
+  </nav>
+
+  <main id="view-queue" class="view">
+    <section>
+      <h2>Downloading</h2>
+      <div id="active-list" class="list"></div>
+    </section>
+    <section>
+      <h2>Recent</h2>
+      <div id="recent-list" class="list"></div>
+    </section>
+  </main>
+
+  <main id="view-settings" class="view" hidden>
+    <section id="setup-help" class="card card-warn" hidden>
+      <div class="card-title">Host not reachable</div>
+      <ol class="steps">
+        <li>Run <code>install/install.sh</code> from the FootageGrab folder</li>
+        <li>Quit the browser fully (⌘Q) and reopen it</li>
+        <li>Reopen this popup</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Footage folder</div>
+      <div class="folder-row">
+        <code id="folder-path" class="folder-path">—</code>
+      </div>
+      <div class="row-actions">
+        <button id="choose-folder" class="btn">Choose folder…</button>
+        <button id="open-folder" class="btn btn-ghost">Open in Finder</button>
+      </div>
+      <p class="hint">Point this at your Premiere project's footage folder. The picker
+      opens behind this popup — reopen the popup to confirm the change.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Downloads</div>
+      <div class="field">
+        <label>Quality</label>
+        <div class="seg" id="quality-seg">
+          <button data-q="best">Best</button>
+          <button data-q="1080">1080p</button>
+          <button data-q="720">720p</button>
+        </div>
+        <p class="hint">Best H.264 the video offers — Premiere-friendly, no VP9/AV1.</p>
+      </div>
+      <div class="field field-row">
+        <div>
+          <label for="accurate-toggle">Accurate cut</label>
+          <p class="hint">Re-encodes at the cut so In/Out land exactly where you marked.
+          Off = faster, cuts snap to keyframes (fine for rough B-roll).</p>
+        </div>
+        <input type="checkbox" id="accurate-toggle" class="switch">
+      </div>
+      <div class="field">
+        <label for="cookies-select">Use browser cookies</label>
+        <select id="cookies-select">
+          <option value="none">Off</option>
+          <option value="chrome">Chrome</option>
+          <option value="brave">Brave</option>
+          <option value="chromium">Chromium</option>
+          <option value="edge">Edge</option>
+        </select>
+        <p class="hint">Only for age/member-restricted videos. macOS will ask for
+        keychain access the first time.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">File names</div>
+      <div class="field">
+        <label for="tpl-segment">Clips</label>
+        <input type="text" id="tpl-segment" spellcheck="false">
+        <code class="preview" id="tpl-segment-preview"></code>
+      </div>
+      <div class="field">
+        <label for="tpl-full">Full videos</label>
+        <input type="text" id="tpl-full" spellcheck="false">
+        <code class="preview" id="tpl-full-preview"></code>
+      </div>
+      <p class="hint">Tokens: <code>{title}</code> <code>{id}</code> <code>{start}</code>
+      <code>{end}</code> <code>{date}</code> <code>{quality}</code></p>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Host</div>
+      <div class="kv"><span>yt-dlp</span><code id="ytdlp-version">—</code></div>
+      <div class="kv"><span>ffmpeg</span><code id="ffmpeg-version">—</code></div>
+      <div class="kv"><span>Logs</span><code id="logs-path" class="wrap">—</code></div>
+      <div class="row-actions">
+        <button id="update-ytdlp" class="btn btn-ghost">Update yt-dlp</button>
+      </div>
+      <pre id="update-output" class="update-output" hidden></pre>
+    </section>
+
+    <p class="legal">For footage you have the rights to use. Personal production use only.</p>
+  </main>
+
+  <div id="save-tick" class="save-tick" hidden>Saved</div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
