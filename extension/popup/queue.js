@@ -51,7 +51,9 @@ function jobRow(job) {
   status.className = "job-status";
   if (job.state === "running") {
     const pct = Math.round((job.progress || 0) * 100);
-    status.textContent = job.stage === "processing" ? "Processing…" : (pct ? `${pct}%` : "Downloading…");
+    status.textContent = job.stage === "transcoding" ? `Converting to H.264… ${pct ? pct + "%" : ""}`.trim()
+      : job.stage === "processing" ? "Processing…"
+      : (pct ? `${pct}%` : "Downloading…");
     const bar = document.createElement("div");
     bar.className = "bar" + (pct ? "" : " bar-indeterminate");
     const fill = document.createElement("div");

@@ -8,8 +8,11 @@ VP9/AV1 that Premiere cannot read without plugins.
 from .timefmt import fmt_section
 
 # -S format sort strings, keyed by the quality setting exposed in the UI.
+# "max": highest resolution wins outright (4K+ arrives as VP9/AV1 — compat.py
+# transcodes those to H.264 afterwards). Capped tiers prefer native H.264 so
+# they need no conversion at all.
 QUALITY_SORT = {
-    "best": "vcodec:h264,res,acodec:m4a",
+    "max": "res,vcodec:h264,acodec:m4a",
     "1080": "vcodec:h264,res:1080,acodec:m4a",
     "720": "vcodec:h264,res:720,acodec:m4a",
 }
@@ -25,7 +28,7 @@ def build_download_args(
     *,
     url,
     out_path,
-    quality="best",
+    quality="max",
     mode="full",
     start=None,
     end=None,
@@ -34,6 +37,8 @@ def build_download_args(
     ytdlp_path="yt-dlp",
     ffmpeg_path=None,
 ):
+    if quality == "best":  # legacy alias
+        quality = "max"
     if quality not in QUALITY_SORT:
         raise ValueError(f"unknown quality: {quality!r}")
     if mode not in ("full", "segment"):

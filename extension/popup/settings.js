@@ -46,6 +46,7 @@ export function paint() {
     b.classList.toggle("active", b.dataset.q === config.quality);
   }
   $("accurate-toggle").checked = !!config.accurate_cut;
+  $("compat-toggle").checked = config.compat_transcode !== false;
   $("cookies-select").value = config.cookies_browser || "none";
   if (document.activeElement !== $("tpl-segment")) $("tpl-segment").value = config.template_segment;
   if (document.activeElement !== $("tpl-full")) $("tpl-full").value = config.template_full;
@@ -87,6 +88,7 @@ export function wire() {
   });
 
   $("accurate-toggle").addEventListener("change", e => patch({ accurate_cut: e.target.checked }));
+  $("compat-toggle").addEventListener("change", e => patch({ compat_transcode: e.target.checked }));
   $("cookies-select").addEventListener("change", e => patch({ cookies_browser: e.target.value }));
 
   for (const [inputId, key, previewId] of [

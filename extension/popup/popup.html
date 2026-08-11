@@ -58,11 +58,21 @@
       <div class="field">
         <label>Quality</label>
         <div class="seg" id="quality-seg">
-          <button data-q="best">Best</button>
+          <button data-q="max">Max (4K+)</button>
           <button data-q="1080">1080p</button>
           <button data-q="720">720p</button>
         </div>
-        <p class="hint">Best H.264 the video offers — Premiere-friendly, no VP9/AV1.</p>
+        <p class="hint">Max grabs the highest resolution the video has (4K/8K).
+        1080p/720p stick to native H.264 — fastest, never converted.</p>
+      </div>
+      <div class="field field-row">
+        <div>
+          <label for="compat-toggle">Premiere-safe H.264</label>
+          <p class="hint">YouTube ships 4K+ only as VP9/AV1, which Premiere can't
+          read. This converts those files to high-bitrate H.264 with the Mac's
+          hardware encoder. Turn off to keep the original codec.</p>
+        </div>
+        <input type="checkbox" id="compat-toggle" class="switch">
       </div>
       <div class="field field-row">
         <div>

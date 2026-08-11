@@ -38,9 +38,12 @@ class BuildArgsTests(unittest.TestCase):
         self.assertIn("--force-keyframes-at-cuts", argv)
 
     def test_quality_sort_strings(self):
-        self.assertIn("vcodec:h264,res,acodec:m4a", build(quality="best"))
+        self.assertIn("res,vcodec:h264,acodec:m4a", build(quality="max"))
         self.assertIn("vcodec:h264,res:1080,acodec:m4a", build(quality="1080"))
         self.assertIn("vcodec:h264,res:720,acodec:m4a", build(quality="720"))
+
+    def test_legacy_best_is_max(self):
+        self.assertEqual(build(quality="best"), build(quality="max"))
 
     def test_cookies_flag(self):
         argv = build(cookies_browser="brave")

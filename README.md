@@ -78,7 +78,8 @@ watch pages.*
 | Setting | Notes |
 |---|---|
 | Footage folder | Where files land. Native folder picker (the popup closes while it's open — reopen to confirm). |
-| Quality | Best / 1080p / 720p — always the best **H.264 + AAC** in mp4, because Premiere doesn't read VP9/AV1. "Best" therefore tops out at 1080p on most videos; that is deliberate. |
+| Quality | **Max (4K+)** grabs the highest resolution the video has. YouTube ships 4K+ only as VP9/AV1, so those are auto-converted (below). 1080p / 720p stick to native H.264 — fastest, never converted. |
+| Premiere-safe H.264 | ON (default): VP9/AV1 downloads are converted to high-bitrate H.264 (50 Mbps at 4K) with the Mac's hardware encoder — a 4K clip converts in seconds on Apple Silicon. OFF: keep the original codec. |
 | Accurate cut | ON: re-encodes at the cuts so In/Out are frame-trustworthy. OFF: stream copy — starts/ends snap to keyframes (± a few seconds, fine for rough B-roll). |
 | Browser cookies | For age/member-restricted videos. macOS will prompt for keychain access. |
 | Filename templates | Clips: `{title}_{start}-{end}_{id}` → `Oprah_Interview_00.42-01.18_dQw4w9WgXcQ.mp4`. Tokens: `{title}` `{id}` `{start}` `{end}` `{date}` `{quality}`. Collisions get `_2`, `_3`, … |

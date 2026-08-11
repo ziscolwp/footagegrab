@@ -14,8 +14,9 @@ from pathlib import Path
 
 DEFAULTS = {
     "output_dir": "~/Movies/FootageGrab",
-    "quality": "best",  # best | 1080 | 720
+    "quality": "max",  # max | 1080 | 720  ("best" is a legacy alias for max)
     "accurate_cut": False,
+    "compat_transcode": True,  # convert VP9/AV1 (all 4K+) to H.264 for Premiere
     "cookies_browser": "none",  # none | chrome | brave | chromium | edge
     "template_segment": "{title}_{start}-{end}_{id}",
     "template_full": "{title}_{id}",
@@ -24,7 +25,7 @@ DEFAULTS = {
     "ffmpeg_path": "",
 }
 
-VALID_QUALITY = ("best", "1080", "720")
+VALID_QUALITY = ("max", "1080", "720", "best")
 VALID_COOKIES = ("none", "chrome", "brave", "chromium", "edge")
 EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
 
@@ -63,6 +64,8 @@ def load():
             cfg.update({k: v for k, v in stored.items() if k in DEFAULTS})
     except (OSError, json.JSONDecodeError):
         pass
+    if cfg.get("quality") == "best":  # pre-0.2 configs
+        cfg["quality"] = "max"
     return cfg
 
 
@@ -89,13 +92,16 @@ def update(patch):
         if key not in DEFAULTS:
             errors.append(f"unknown setting: {key}")
             continue
-        if key == "quality" and value not in VALID_QUALITY:
-            errors.append(f"quality must be one of {', '.join(VALID_QUALITY)}")
-            continue
+        if key == "quality":
+            if value not in VALID_QUALITY:
+                errors.append(f"quality must be one of {', '.join(VALID_QUALITY)}")
+                continue
+            if value == "best":
+                value = "max"
         if key == "cookies_browser" and value not in VALID_COOKIES:
             errors.append(f"cookies_browser must be one of {', '.join(VALID_COOKIES)}")
             continue
-        if key == "accurate_cut":
+        if key in ("accurate_cut", "compat_transcode"):
             value = bool(value)
         if key == "max_concurrent":
             try:

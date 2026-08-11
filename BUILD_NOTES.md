@@ -32,9 +32,16 @@ install/   install.sh (browsers: Chrome/Brave/Chromium/Edge/Arc) + uninstall.sh
   **pinned by a `key` in manifest.json** (ID `lklbfpaopllmcbehfahbapehpadmlnel`
   on every machine), so the host manifest works without a per-install ID dance.
   Trade-off: a full browser quit can kill the host mid-download (see risks).
-- **H.264+AAC preferred over max resolution** (`-S vcodec:h264,res,acodec:m4a`).
-  Premiere doesn't read VP9/AV1 without plugins; an editor tool should never
-  deliver a file Premiere rejects. Consequence: "Best" typically = 1080p.
+- **Quality model (revised after first field test)**: v0.1 capped "Best" at
+  the best H.264 (= 1080p on YouTube, since 4K+ is VP9/AV1 only) and the user
+  immediately hit it on a 4K video. Now **Max** (`-S res,vcodec:h264,acodec:m4a`)
+  takes the true highest resolution, and `compat.py` probes the result with
+  ffprobe: anything non-H.264 is re-encoded to high-bitrate H.264
+  (`h264_videotoolbox` hardware encoder, libx264 fallback, 50 Mbps at 2160p,
+  `yuv420p` so 10-bit HDR sources land 8-bit) with ffmpeg `-progress`
+  parsing feeding the "Converting for Premiere" UI stage. Transcode failure
+  keeps the original file rather than failing the job. 1080p/720p tiers stay
+  H.264-native and never transcode. Legacy config value "best" → "max".
 - **Accurate cut = yt-dlp `--force-keyframes-at-cuts`** (re-encode at cuts),
   not a hand-rolled pad+ffmpeg-trim pipeline. The pad approach can't know the
   actual keyframe offset of the padded download without probing
@@ -71,6 +78,13 @@ install/   install.sh (browsers: Chrome/Brave/Chromium/Edge/Arc) + uninstall.sh
    reached the job error field (no stack traces).
 7. **Installer on this machine**: registered with Chrome, Brave, Chromium,
    Edge, Arc; native messaging roundtrip through the installed launcher OK.
+8. **Real 4K segment, Max quality** (v0.2 quality model): Big Buck Bunny
+   0:30–0:35 → downloaded as VP9 2160p60, hardware-transcoded → **3840×2160
+   @ 60 fps, H.264 High, AAC, 5.01s, 33 MB**; both `downloading` and
+   `transcoding` stages reached the progress UI. Test count now 46.
+9. **Premiere MCP bridge on this machine**: `verify_premiere_connection`
+   returned ready (CEP backend, open project + active sequence detected) —
+   the stopgap import path below is confirmed working.
 
 Not yet exercised by an automated test: the content-script UI against live
 YouTube DOM (markers, pill, toasts) — manual-verify on first run; selectors

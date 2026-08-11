@@ -90,7 +90,9 @@
       const bar = job.progress > 0
         ? `<div class="fg-bar"><div class="fg-bar-fill" style="width:${pct}%"></div></div>`
         : `<div class="fg-bar fg-bar-indeterminate"><div class="fg-bar-fill"></div></div>`;
-      const label = job.stage === "processing" ? "Processing" : (pct > 0 ? `${pct}%` : "Downloading");
+      const label = job.stage === "transcoding" ? `Converting for Premiere ${pct > 0 ? pct + "%" : ""}`.trim()
+        : job.stage === "processing" ? "Processing"
+        : (pct > 0 ? `${pct}%` : "Downloading");
       stateHtml = `<div class="fg-job-status">${label}</div>${bar}`;
     } else if (job.state === "done") {
       stateHtml = `<div class="fg-job-status fg-ok">Saved to footage folder</div>`;

@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import config, naming, sections, timefmt
+from . import compat, config, naming, sections, timefmt
 
 log = logging.getLogger("footagegrab.runner")
 
@@ -39,7 +39,7 @@ class DownloadRunner:
         except OSError as exc:
             return False, f"output folder unavailable: {exc}", ""
 
-        quality = job.quality or cfg.get("quality", "best")
+        quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
         path = self._plan_path(job, cfg, out_dir, quality)
         try:
@@ -86,6 +86,11 @@ class DownloadRunner:
         if rc == 0:
             final = path if path.exists() else self._find_output(path)
             if final:
+                if cfg.get("compat_transcode", True):
+                    final, cerr = self._ensure_compat(job, Path(final), ffmpeg, on_progress)
+                    if cerr == "canceled":
+                        Path(final).unlink(missing_ok=True)
+                        return False, "canceled", ""
                 log.info("job %s done: %s", job.id, final)
                 return True, "", str(final)
             return False, "yt-dlp finished but produced no output file", ""
@@ -105,6 +110,56 @@ class DownloadRunner:
         timer.daemon = True
         timer.start()
         return True
+
+    def _ensure_compat(self, job, path, ffmpeg, on_progress):
+        """Re-encode VP9/AV1 downloads to H.264 in place. Returns (path, error).
+
+        Best-effort: if probing or every encoder fails, the original file is
+        kept and the job still succeeds — a playable file beats a failed job.
+        """
+        ffprobe = compat.find_ffprobe(ffmpeg)
+        info = compat.probe(ffprobe, path) if ffprobe else None
+        if not info or info["vcodec"] in compat.SAFE_VCODECS:
+            return path, ""
+        log.info("job %s: %s is %s — transcoding to H.264",
+                 job.id, path.name, info["vcodec"])
+        if on_progress:
+            on_progress(0.0, "transcoding")
+        dst = path.with_name(path.stem + ".h264tmp.mp4")
+        for encoder in ("h264_videotoolbox", "libx264"):
+            argv = compat.build_transcode_args(
+                ffmpeg, path, dst,
+                height=info["height"], acodec=info["acodec"], encoder=encoder,
+            )
+            try:
+                proc = subprocess.Popen(
+                    argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, errors="replace",
+                )
+            except OSError:
+                break
+            self._register(job.id, proc)
+            try:
+                for line in proc.stdout:
+                    frac = compat.parse_progress_line(line.strip(), info["duration"])
+                    if frac is not None and on_progress:
+                        on_progress(frac, "transcoding")
+                rc = proc.wait()
+            finally:
+                self._unregister(job.id)
+            if job.cancel_requested:
+                dst.unlink(missing_ok=True)
+                return path, "canceled"
+            if rc == 0 and dst.exists() and dst.stat().st_size > 0:
+                path.unlink(missing_ok=True)
+                dst.rename(path)
+                return path, ""
+            dst.unlink(missing_ok=True)
+            log.warning("job %s: %s failed (rc=%s), trying next encoder",
+                        job.id, encoder, rc)
+        log.warning("job %s: transcode failed — keeping original %s file",
+                    job.id, info["vcodec"])
+        return path, ""
 
     def _plan_path(self, job, cfg, out_dir, quality):
         fields = {
