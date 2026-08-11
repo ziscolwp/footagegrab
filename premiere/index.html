@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FootageGrab Bridge</title>
+  <link rel="stylesheet" href="css/panel.css" />
+</head>
+<body>
+  <header class="hdr">
+    <div class="brand">Footage<b>Grab</b> <span class="bridge">Bridge</span></div>
+    <div class="host-status"><span id="dot" class="dot"></span><span id="dot-label">starting</span></div>
+  </header>
+
+  <main class="view">
+    <section>
+      <div id="status-line" class="status-line">
+        <span id="status-verb">Starting</span>
+        <code id="status-path" class="status-path"></code>
+      </div>
+      <div id="status-error" class="status-error" hidden></div>
+    </section>
+
+    <section>
+      <div class="field">
+        <label for="bin-name">Import into bin</label>
+        <input type="text" id="bin-name" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="dir-override">Folder override</label>
+        <input type="text" id="dir-override" spellcheck="false"
+               placeholder="Auto — follows FootageGrab settings" />
+        <div class="hint">Leave empty to watch the folder set in the browser extension.</div>
+      </div>
+      <div class="row-actions">
+        <button id="pause-btn" class="btn btn-ghost">Pause</button>
+        <button id="scan-btn" class="btn">Import existing now</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Recent imports</h2>
+      <div id="recent" class="list"><div class="empty">Nothing imported yet</div></div>
+    </section>
+  </main>
+
+  <script src="js/CSInterface.js"></script>
+  <script src="js/watchcore.js"></script>
+  <script src="js/panel.js"></script>
+</body>
+</html>

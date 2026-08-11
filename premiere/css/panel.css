@@ -1,0 +1,139 @@
+/* FootageGrab Bridge — same design language as the extension popup:
+   dark slate, monospace paths, green In / amber Out accents. */
+
+:root {
+  --in: #17c964;
+  --out: #f5a524;
+  --bg: #1d1d1f;      /* a notch lighter than the popup: sits inside Premiere's dark slate */
+  --panel: #252528;
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #f2f2f0;
+  --dim: #9b9b97;
+  --danger: #ff5c77;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 12.5px/1.45 Roboto, -apple-system, Arial, sans-serif;
+  overflow-y: auto;
+  user-select: none;
+}
+
+.hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+.brand { font-size: 14px; letter-spacing: 0.2px; }
+.brand b { color: var(--in); font-weight: 700; }
+.brand .bridge { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+
+.host-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.dot.ok { background: var(--in); box-shadow: 0 0 6px rgba(23, 201, 100, 0.6); }
+.dot.warn { background: var(--out); }
+.dot.down { background: var(--danger); }
+
+.view { padding: 8px 14px 14px; display: grid; gap: 14px; }
+section h2 {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--dim);
+  margin-bottom: 7px;
+}
+
+.status-line {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 11px;
+  display: grid;
+  gap: 3px;
+}
+#status-verb { font-weight: 700; font-size: 12px; }
+.status-path {
+  font: 500 10.5px/1.5 var(--mono);
+  color: var(--dim);
+  word-break: break-all;
+  user-select: text;
+}
+.status-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 11.5px;
+  background: rgba(255, 92, 119, 0.08);
+  border: 1px solid rgba(255, 92, 119, 0.35);
+  border-radius: 8px;
+  padding: 7px 10px;
+  word-break: break-word;
+}
+
+.field { display: grid; gap: 4px; margin-bottom: 10px; }
+.field label { font-weight: 600; font-size: 12px; }
+.hint { color: var(--dim); font-size: 10.5px; }
+
+input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  font: 500 11.5px/1.3 var(--mono);
+  padding: 6px 9px;
+  width: 100%;
+}
+input[type="text"]:focus { outline: 1px solid var(--in); }
+
+.row-actions { display: flex; gap: 8px; }
+.btn {
+  font: 600 11.5px/1 Roboto, Arial, sans-serif;
+  background: var(--in);
+  color: #08160d;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 12px;
+  cursor: pointer;
+  flex: 1;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn-ghost { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.15); filter: none; }
+.btn-ghost.paused { background: rgba(245, 165, 36, 0.2); color: var(--out); }
+
+.list { display: grid; gap: 5px; }
+.empty {
+  color: var(--dim);
+  font-size: 11.5px;
+  padding: 12px 10px;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  text-align: center;
+}
+.import-row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.import-name {
+  flex: 1;
+  font: 500 11px/1.4 var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.import-tag { font-size: 10px; color: var(--in); flex-shrink: 0; }
+.import-tag.dup { color: var(--dim); }
+.import-time { font-size: 10px; color: var(--dim); flex-shrink: 0; }
