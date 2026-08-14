@@ -18,6 +18,7 @@
         <code id="status-path" class="status-path"></code>
       </div>
       <div id="status-error" class="status-error" hidden></div>
+      <div id="status-hint" class="status-hint" hidden></div>
     </section>
 
     <section>
@@ -30,6 +31,13 @@
         <input type="text" id="dir-override" spellcheck="false"
                placeholder="Auto — follows FootageGrab settings" />
         <div class="hint">Leave empty to watch the folder set in the browser extension.</div>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input type="checkbox" id="insert-toggle" />
+          Insert into timeline at playhead
+        </label>
+        <div class="hint">New grabs cut into the active sequence back-to-back; the playhead follows to the end of each clip.</div>
       </div>
       <div class="row-actions">
         <button id="pause-btn" class="btn btn-ghost">Pause</button>

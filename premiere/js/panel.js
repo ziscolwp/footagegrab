@@ -27,7 +27,8 @@
   var ui = {
     dot: $("dot"), dotLabel: $("dot-label"),
     verb: $("status-verb"), path: $("status-path"), error: $("status-error"),
-    bin: $("bin-name"), dir: $("dir-override"),
+    hint: $("status-hint"),
+    bin: $("bin-name"), dir: $("dir-override"), insert: $("insert-toggle"),
     pause: $("pause-btn"), scan: $("scan-btn"), recent: $("recent"),
   };
 
@@ -47,6 +48,10 @@
   var binName = settings.bin || "FootageGrab";
   var dirOverride = settings.dir || "";
   var paused = !!settings.paused;
+  var insertToTimeline = settings.insert !== false; // default ON
+  // Rotation offset for per-clip color labels; the jsx side mods it into its
+  // palette, so this only needs to keep counting (capped to stay small).
+  var labelCounter = Number(settings.labelIdx) || 0;
 
   var seenList = loadJSON("fg_seen_keys", []);
   var seenSet = {};
@@ -61,7 +66,10 @@
   }
 
   function saveSettings() {
-    saveJSON("fg_settings", { bin: binName, dir: dirOverride, paused: paused });
+    saveJSON("fg_settings", {
+      bin: binName, dir: dirOverride, paused: paused,
+      insert: insertToTimeline, labelIdx: labelCounter,
+    });
   }
 
   // ---- folder resolution ------------------------------------------------
@@ -97,6 +105,7 @@
   var watcher = null;
   var importing = false;
   var lastError = "";
+  var lastHint = "";
   var recent = [];       // [{name, tag, time}]
   var failCounts = {};   // path -> failed import attempts this session
   var MAX_ATTEMPTS = 3;
@@ -167,24 +176,81 @@
     importing = true;
     var literals = [];
     for (var i = 0; i < readyEntries.length; i++) literals.push(jsxString(readyEntries[i].path));
-    var script = "FG_importBatch([" + literals.join(",") + "]," + jsxString(binName) + ")";
+    var script = "FG_importBatch([" + literals.join(",") + "]," + jsxString(binName) +
+      "," + labelCounter + ")";
     cs.evalScript(script, function (result) {
+      // insertImported takes ownership of `importing`; if we never hand off
+      // (error, or a throw anywhere here), release it so the watcher can't
+      // wedge in a permanent green-but-dead state.
+      var handedOff = false;
+      try {
+        var res = null;
+        try { res = JSON.parse(result); } catch (e) {}
+        if (!res || !res.ok) {
+          // keys stay unrecorded so the batch retries next tick
+          lastError = res && res.error ? res.error : "Premiere did not answer (is a project open?)";
+          renderStatusError();
+          return;
+        }
+        lastError = "";
+        if (res.imported && res.imported.length) {
+          // skipped duplicates don't burn a color — only real imports advance
+          labelCounter = (labelCounter + res.imported.length) % 10000;
+          saveSettings();
+        }
+        recordOutcome(readyEntries, res.imported || [], "imported");
+        recordOutcome(readyEntries, res.skipped || [], "already in project");
+        recordFailures(readyEntries, res.failed || []);
+        renderRecent();
+        renderStatusError();
+        insertImported(readyEntries, res.imported || []);
+        handedOff = true;
+      } finally {
+        if (!handedOff) importing = false;
+      }
+    });
+  }
+
+  // Timeline insert runs after the bin import settles so an insert problem
+  // can never lose footage — worst case the clip only lands in the bin.
+  // `importing` stays true until the insert answers so a batch from the next
+  // tick can't interleave its clips mid-chain.
+  function insertImported(entries, paths) {
+    if (!insertToTimeline || !paths.length) { importing = false; return; }
+    var literals = [];
+    for (var i = 0; i < paths.length; i++) literals.push(jsxString(paths[i]));
+    cs.evalScript("FG_insertAtPlayhead([" + literals.join(",") + "])", function (result) {
       importing = false;
       var res = null;
       try { res = JSON.parse(result); } catch (e) {}
+      lastHint = "";
       if (!res || !res.ok) {
-        // keys stay unrecorded so the batch retries next tick
-        lastError = res && res.error ? res.error : "Premiere did not answer (is a project open?)";
-        renderStatusError();
-        return;
+        lastError = res && res.error ? res.error : "Imported, but timeline insert failed";
+      } else if (res.noSequence) {
+        lastHint = "Imported to bin — open a sequence to insert at the playhead";
+      } else if (res.failed && res.failed.length) {
+        lastError = res.failed.length + " clip(s) imported but could not be inserted";
       }
-      lastError = "";
-      recordOutcome(readyEntries, res.imported || [], "imported");
-      recordOutcome(readyEntries, res.skipped || [], "already in project");
-      recordFailures(readyEntries, res.failed || []);
+      retagRecent(entries, (res && res.inserted) || [], "inserted");
       renderRecent();
       renderStatusError();
     });
+  }
+
+  // Upgrade the freshly-recorded "imported" rows to "inserted" once the
+  // timeline confirms them.
+  function retagRecent(entries, paths, tag) {
+    for (var i = 0; i < paths.length; i++) {
+      for (var j = 0; j < entries.length; j++) {
+        if (entries[j].path !== paths[i]) continue;
+        for (var k = 0; k < recent.length; k++) {
+          if (recent[k].name === entries[j].name && recent[k].tag === "imported") {
+            recent[k].tag = tag;
+            break;
+          }
+        }
+      }
+    }
   }
 
   // A file Premiere can't import retries a couple of ticks (it may still be
@@ -232,6 +298,8 @@
   function renderStatusError() {
     ui.error.hidden = !lastError;
     ui.error.textContent = lastError;
+    ui.hint.hidden = !lastHint;
+    ui.hint.textContent = lastHint;
   }
 
   function fmtTime(d) {
@@ -257,7 +325,8 @@
       name.title = recent[i].name;
       var tag = document.createElement("span");
       tag.className = "import-tag" +
-        (recent[i].tag === "imported" ? "" : recent[i].tag === "failed" ? " fail" : " dup");
+        (recent[i].tag === "imported" || recent[i].tag === "inserted" ? ""
+          : recent[i].tag === "failed" ? " fail" : " dup");
       tag.textContent = recent[i].tag;
       var time = document.createElement("span");
       time.className = "import-time";
@@ -276,7 +345,14 @@
 
   ui.bin.value = binName;
   ui.dir.value = dirOverride;
+  ui.insert.checked = insertToTimeline;
   renderPause();
+
+  ui.insert.addEventListener("change", function () {
+    insertToTimeline = ui.insert.checked;
+    if (!insertToTimeline) { lastHint = ""; renderStatusError(); }
+    saveSettings();
+  });
 
   ui.bin.addEventListener("change", function () {
     binName = ui.bin.value.trim() || "FootageGrab";

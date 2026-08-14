@@ -31,6 +31,12 @@ function FG__binType() {
   return typeof ProjectItemType !== "undefined" ? ProjectItemType.BIN : 2;
 }
 
+// Canonical form for path comparison: panel paths use forward slashes even on
+// Windows, while getMediaPath() returns native backslashes.
+function FG__norm(p) {
+  return String(p).toLowerCase().replace(/\\/g, "/");
+}
+
 // Recursively collect lowercase media paths of every clip in the project.
 function FG__collectPaths(item, out) {
   var kids = item.children;
@@ -42,7 +48,7 @@ function FG__collectPaths(item, out) {
     } else {
       try {
         var p = child.getMediaPath();
-        if (p) out[String(p).toLowerCase()] = true;
+        if (p) out[FG__norm(p)] = true;
       } catch (e) {} // sequences etc. have no media path
     }
   }
@@ -78,9 +84,104 @@ function FG_ping() {
   }
 }
 
+// Recursively find the project item whose media path matches (lowercase).
+function FG__findByPath(item, wanted) {
+  var kids = item.children;
+  if (!kids) return null;
+  for (var i = 0; i < kids.numItems; i++) {
+    var child = kids[i];
+    if (child.type === FG__binType()) {
+      var hit = FG__findByPath(child, wanted);
+      if (hit) return hit;
+    } else {
+      try {
+        var p = child.getMediaPath();
+        if (p && FG__norm(p) === wanted) return child;
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+// After insertClip lands at (or near) `atSeconds`, locate the actual clip on
+// the track: same media path, start closest to the requested time. Insert can
+// snap to a frame boundary, so exact equality is unreliable.
+function FG__findInserted(track, wantedPath, atSeconds) {
+  var best = null;
+  var bestDelta = 0.5; // more than any frame duration, less than any clip
+  for (var i = 0; i < track.clips.numItems; i++) {
+    var clip = track.clips[i];
+    try {
+      var p = clip.projectItem.getMediaPath();
+      if (!p || FG__norm(p) !== wantedPath) continue;
+    } catch (e) { continue; }
+    var delta = Math.abs(clip.start.seconds - atSeconds);
+    if (delta < bestDelta) { bestDelta = delta; best = clip; }
+  }
+  return best;
+}
+
+// paths: files already imported by FG_importBatch. Inserts each (in order)
+// into V1 of the active sequence at the playhead, chaining back-to-back, then
+// parks the playhead at the end of the last inserted clip so the next grab
+// continues the sequence. Insert edit (ripple), never overwrite.
+function FG_insertAtPlayhead(paths) {
+  try {
+    if (!app.project) return FG__err("no project open");
+    var seq = app.project.activeSequence;
+    if (!seq) {
+      return '{"ok":true,"noSequence":true,"inserted":[],"failed":' + FG__arr(paths) + "}";
+    }
+    var track = seq.videoTracks && seq.videoTracks.numTracks > 0 ? seq.videoTracks[0] : null;
+    if (!track) return FG__err("active sequence has no video track");
+    var at = seq.getPlayerPosition().seconds;
+    var inserted = [];
+    var failed = [];
+    var lastEndTicks = null;
+    for (var i = 0; i < paths.length; i++) {
+      var wanted = FG__norm(paths[i]);
+      var item = FG__findByPath(app.project.rootItem, wanted);
+      if (!item) { failed.push(paths[i]); continue; }
+      try {
+        track.insertClip(item, at);
+      } catch (e) { failed.push(paths[i]); continue; }
+      var clip = FG__findInserted(track, wanted, at);
+      if (!clip) { failed.push(paths[i]); continue; }
+      inserted.push(paths[i]);
+      at = clip.end.seconds;
+      lastEndTicks = clip.end.ticks;
+    }
+    if (lastEndTicks !== null) {
+      try { seq.setPlayerPosition(lastEndTicks); } catch (e) {}
+    }
+    return '{"ok":true,"noSequence":false,"inserted":' + FG__arr(inserted) +
+           ',"failed":' + FG__arr(failed) + "}";
+  } catch (e) {
+    return FG__err("insert failed: " + e.toString());
+  }
+}
+
+// Rotation of visually distinct Premiere label indices: Caribbean, Rose,
+// Mango, Cerulean, Magenta, Yellow, Purple, Green, Blue, Brown. Near-twins
+// (Violet/Iris/Lavender, Forest vs Green) are left out on purpose.
+var FG_LABELS = [2, 6, 7, 4, 11, 15, 8, 13, 9, 14];
+
+// Each freshly imported clip gets the next label in the rotation so grabs are
+// telling-apart-able at a glance in the bin and on the timeline. labelStart is
+// the panel's persisted rotation offset. setColorLabel arrived ~PPro 14; on
+// older hosts coloring silently no-ops rather than failing the import.
+function FG__labelImported(bin, imported, labelStart) {
+  var start = labelStart > 0 ? Math.floor(labelStart) : 0;
+  for (var i = 0; i < imported.length; i++) {
+    var item = FG__findByPath(bin, FG__norm(imported[i]));
+    if (!item) continue;
+    try { item.setColorLabel(FG_LABELS[(start + i) % FG_LABELS.length]); } catch (e) {}
+  }
+}
+
 // paths: JS array literal built by the panel. One importFiles call for the
 // whole batch = one undo step. Never imports into the root or a sequence.
-function FG_importBatch(paths, binName) {
+function FG_importBatch(paths, binName, labelStart) {
   try {
     if (!app.project) return FG__err("no project open");
     var existing = {};
@@ -88,7 +189,7 @@ function FG_importBatch(paths, binName) {
     var toImport = [];
     var skipped = [];
     for (var i = 0; i < paths.length; i++) {
-      if (existing[String(paths[i]).toLowerCase()]) skipped.push(paths[i]);
+      if (existing[FG__norm(paths[i])]) skipped.push(paths[i]);
       else toImport.push(paths[i]);
     }
     if (toImport.length === 0) {
@@ -112,6 +213,7 @@ function FG_importBatch(paths, binName) {
         else failed.push(toImport[k]);
       }
     }
+    FG__labelImported(bin, imported, labelStart);
     return '{"ok":true,"imported":' + FG__arr(imported) +
            ',"skipped":' + FG__arr(skipped) +
            ',"failed":' + FG__arr(failed) + "}";

@@ -104,6 +104,17 @@ and falls back to CPU x264 (slower than the Mac hardware path, same quality).
 `install\uninstall.bat` removes the registrations. On grabs failing with
 "Sign in…" errors, enable Browser cookies in Settings, same as macOS.
 
+## Updating
+
+Grab the latest version the same way you installed: green **Code** button →
+**Download ZIP** → unzip, replacing your existing folder. Then:
+
+- **Windows**: double-click `install\install.bat`, then
+  `install\install-premiere.bat`. Reload the extension at `chrome://extensions`
+  (⟳ on the FootageGrab card) and restart Premiere. Your settings are kept.
+- **macOS**: re-run `./install/install.sh` and `./install/install-premiere.sh`,
+  reload the extension, restart Premiere.
+
 ## Use
 
 On any YouTube watch page:
@@ -178,6 +189,15 @@ forget it. While the panel is open:
 - Any new video file in the footage folder (grabbed *or* dropped in by hand)
   is imported into the **FootageGrab** bin within ~2 seconds — no dialogs, no
   focus stealing, one undo step per batch.
+- **Timeline assembly:** with *Insert into timeline at playhead* on (the
+  default), each grab also cuts into V1 of the active sequence at the
+  playhead, and the playhead jumps to the clip's end — so grab after grab
+  builds the sequence back-to-back without ever switching to Premiere.
+  Untick it to stockpile into the bin only. No sequence open? Clips still
+  land safely in the bin and the panel shows a hint.
+- **Color labels:** every imported clip gets the next of 10 distinct label
+  colors (rotation persists across sessions), so grabs are easy to tell
+  apart in the bin and on the timeline.
 - The panel follows the folder set in the extension popup automatically
   (re-read every poll), or you can pin a different folder in its override
   field. Bin name is editable. External volumes
