@@ -75,6 +75,19 @@ function FG__ensureBin(name) {
   return null;
 }
 
+// The saved project file's path, or "" for unsaved projects — the panel
+// derives the project-relative footage folder from it.
+function FG_projectPath() {
+  try {
+    if (!app.project) return '{"ok":true,"path":""}';
+    var p = "";
+    try { p = String(app.project.path || ""); } catch (e) {}
+    return '{"ok":true,"path":' + FG__q(p) + "}";
+  } catch (e) {
+    return FG__err("projectPath failed: " + e.toString());
+  }
+}
+
 function FG_ping() {
   try {
     if (!app.project) return FG__err("no project open");

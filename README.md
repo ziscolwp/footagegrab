@@ -198,9 +198,15 @@ forget it. While the panel is open:
 - **Color labels:** every imported clip gets the next of 10 distinct label
   colors (rotation persists across sessions), so grabs are easy to tell
   apart in the bin and on the timeline.
-- The panel follows the folder set in the extension popup automatically
-  (re-read every poll), or you can pin a different folder in its override
-  field. Bin name is editable. External volumes
+- **Save next to project** (default on): grabs download into a `FootageGrab`
+  folder created beside the open `.prproj` and import from there — so each
+  project keeps its own footage, and switching projects retargets everything
+  automatically. Untick it (or use the override field) to go back to one
+  global folder. Unsaved projects fall back to the global folder until you
+  save them.
+- Otherwise the panel follows the folder set in the extension popup
+  automatically (re-read every poll), or you can pin a different folder in
+  its override field. Bin name is editable. External volumes
   (`/Volumes/...`) are fine — the watcher polls rather than trusting FSEvents.
 - **Catch-up:** anything downloaded while Premiere was closed is imported on
   panel open (or press *Import existing now*). Already-imported files are

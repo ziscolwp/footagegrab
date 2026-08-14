@@ -48,11 +48,25 @@
     return keys.length > max ? keys.slice(keys.length - max) : keys;
   }
 
+  // "<project dir>/<folderName>" from a .prproj path, honoring the path's own
+  // separator style (Windows projects report backslashes). Empty when the
+  // project isn't on disk yet (unsaved: no separator) or sits at the
+  // filesystem root (cut <= 0) — callers fall back to the configured folder.
+  function projectFootageDir(projectPath, folderName) {
+    var p = String(projectPath || "");
+    if (!p) return "";
+    var cut = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    if (cut <= 0) return "";
+    var sep = p.charAt(cut);
+    return p.slice(0, cut) + sep + (folderName || "FootageGrab");
+  }
+
   var api = {
     isCandidateName: isCandidateName,
     dedupeKey: dedupeKey,
     planTick: planTick,
     pruneKeys: pruneKeys,
+    projectFootageDir: projectFootageDir,
   };
 
   // CEP's --mixed-context injects Node's `module` into the page, so this

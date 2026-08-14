@@ -95,6 +95,23 @@ test("planTick: batch — several files can become ready in one tick", () => {
   assert.strictEqual(p.ready.length, 2);
 });
 
+test("projectFootageDir derives a sibling folder from the project path", () => {
+  assert.strictEqual(
+    W.projectFootageDir("/Users/z/Edits/MyDoc/MyDoc.prproj", "FootageGrab"),
+    "/Users/z/Edits/MyDoc/FootageGrab");
+  assert.strictEqual(
+    W.projectFootageDir("C:\\Users\\z\\Edits\\MyDoc.prproj", "FootageGrab"),
+    "C:\\Users\\z\\Edits\\FootageGrab");
+  assert.strictEqual(W.projectFootageDir("/a/b.prproj"), "/a/FootageGrab"); // default name
+});
+
+test("projectFootageDir returns empty for unsaved/absent projects", () => {
+  assert.strictEqual(W.projectFootageDir(""), "");
+  assert.strictEqual(W.projectFootageDir(null), "");
+  assert.strictEqual(W.projectFootageDir("Untitled.prproj"), ""); // no separator: not on disk
+  assert.strictEqual(W.projectFootageDir("/loose.prproj"), ""); // refuses filesystem root
+});
+
 test("pruneKeys keeps the most recent entries", () => {
   const keys = [];
   for (let i = 0; i < 600; i++) keys.push("k" + i);

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 
 from . import config, counters, prefetch, system, timefmt
 from .jobs import Job, RUNNING
@@ -146,7 +147,9 @@ class Router:
 
     def _open_folder(self, msg):
         cfg = config.load()
-        path = msg.get("path") or cfg.get("output_dir")
+        # effective folder, not raw output_dir — while the Premiere panel owns
+        # the target, "Open folder" must open where grabs actually land
+        path = msg.get("path") or os.path.expanduser(config.effective_output_dir(cfg))
         ok, error = system.open_folder(path)
         if not ok:
             raise AppError(error)

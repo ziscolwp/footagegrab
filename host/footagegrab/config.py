@@ -10,10 +10,17 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 DEFAULTS = {
     "output_dir": "~/Movies/FootageGrab" if sys.platform == "darwin" else "~/Videos/FootageGrab",
+    # Written by the Premiere panel's "Save next to project" mode; wins over
+    # output_dir while non-empty AND freshly heartbeated (see PROJECT_CLAIM_TTL)
+    # — so a panel that quit without cleaning up can't redirect downloads
+    # forever. The user's global output_dir is never touched.
+    "project_output_dir": "",
+    "project_output_dir_ts": 0,  # unix seconds of the panel's last heartbeat
     "quality": "max",  # max | 1080 | 720  ("best" is a legacy alias for max)
     "accurate_cut": False,
     "compat_transcode": True,  # convert VP9/AV1 (all 4K+) to H.264 for Premiere
@@ -123,7 +130,8 @@ def update(patch):
             except (TypeError, ValueError):
                 errors.append("max_concurrent must be a number")
                 continue
-        if key in ("output_dir", "template_segment", "template_full", "ytdlp_path", "ffmpeg_path"):
+        if key in ("output_dir", "project_output_dir", "template_segment",
+                   "template_full", "ytdlp_path", "ffmpeg_path"):
             value = str(value).strip()
             if key.startswith("template") and not value:
                 errors.append(f"{key} cannot be empty")
@@ -136,9 +144,34 @@ def update(patch):
     return cfg, errors
 
 
+# The panel refreshes its claim roughly every 30s while alive; three missed
+# heartbeats means it is gone (Premiere quit, panel closed, machine slept).
+PROJECT_CLAIM_TTL = 90
+
+
+def project_claim_fresh(cfg, now=None):
+    """True while the Premiere panel's project-folder claim is heartbeated."""
+    if not str(cfg.get("project_output_dir") or "").strip():
+        return False
+    try:
+        ts = float(cfg.get("project_output_dir_ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    now = time.time() if now is None else now
+    return abs(now - ts) <= PROJECT_CLAIM_TTL
+
+
+def effective_output_dir(cfg):
+    """The folder downloads actually use (unexpanded): a live project claim
+    wins, else the user's own output_dir."""
+    if project_claim_fresh(cfg):
+        return str(cfg["project_output_dir"]).strip()
+    return str(cfg.get("output_dir") or DEFAULTS["output_dir"])
+
+
 def ensure_output_dir(cfg):
     """Expand, create, and sanity-check the output folder. Raises OSError."""
-    path = Path(str(cfg.get("output_dir") or DEFAULTS["output_dir"])).expanduser()
+    path = Path(effective_output_dir(cfg)).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     if not os.access(path, os.W_OK):
         raise OSError(f"not writable: {path}")

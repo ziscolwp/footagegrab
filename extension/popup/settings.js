@@ -41,7 +41,14 @@ function patch(fields) {
 
 export function paint() {
   if (!config) return;
-  $("folder-path").textContent = config.output_dir || "—";
+  // While the Premiere panel's "Save next to project" claim is live, grabs
+  // land in the project folder — show that, not the (unchanged) global one.
+  const claimTs = Number(config.project_output_dir_ts) || 0;
+  const claimLive = config.project_output_dir &&
+    Math.abs(Date.now() / 1000 - claimTs) <= 90;
+  $("folder-path").textContent = claimLive
+    ? `${config.project_output_dir} (set by Premiere project)`
+    : (config.output_dir || "—");
   for (const b of $("quality-seg").querySelectorAll("button")) {
     b.classList.toggle("active", b.dataset.q === config.quality);
   }
