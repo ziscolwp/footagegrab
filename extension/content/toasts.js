@@ -99,6 +99,7 @@
         : `<div class="fg-bar fg-bar-indeterminate"><div class="fg-bar-fill"></div></div>`;
       const label = job.stage === "transcoding" ? `Converting for Premiere ${pct > 0 ? pct + "%" : ""}`.trim()
         : job.stage === "processing" ? "Processing"
+        : job.stage === "retrying" ? "Retrying"
         : (pct > 0 ? `${pct}%` : "Downloading");
       stateHtml = `<div class="fg-job-status">${label}</div>${bar}`;
     } else if (job.state === "done") {

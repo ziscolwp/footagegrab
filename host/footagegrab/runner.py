@@ -41,18 +41,74 @@ class DownloadRunner:
 
         quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
+        cookies = cfg.get("cookies_browser")
         self._ensure_metadata(job, cfg, ytdlp, on_progress)
         path = self._plan_path(job, cfg, out_dir, quality)
-        try:
-            argv = sections.build_download_args(
-                url=job.url, out_path=path, quality=quality,
-                mode=job.mode, start=job.start, end=job.end, accurate=accurate,
-                cookies_browser=cfg.get("cookies_browser"),
-                ytdlp_path=ytdlp, ffmpeg_path=ffmpeg,
-            )
-        except ValueError as exc:
-            return False, str(exc), ""
 
+        # Transient stream failures (YouTube 403s the URLs it just issued;
+        # ffmpeg exits with code 8) climb a ladder: plain run -> delayed retry
+        # on a rotated player client -> full-download-and-local-cut fallback.
+        # Permanent errors (login walls, removed videos) exit on the first rung.
+        attempt = 0
+        client = None
+        ok, error, final = False, "", ""
+        while True:
+            attempt += 1
+            try:
+                argv = sections.build_download_args(
+                    url=job.url, out_path=path, quality=quality,
+                    mode=job.mode, start=job.start, end=job.end, accurate=accurate,
+                    cookies_browser=cookies,
+                    ytdlp_path=ytdlp, ffmpeg_path=ffmpeg, player_client=client,
+                )
+            except ValueError as exc:
+                return False, str(exc), ""
+            ok, error, final = self._attempt(job, argv, path, on_progress)
+            if ok:
+                break
+            if job.cancel_requested or error == "canceled":
+                return False, "canceled", ""
+            if not sections.is_transient_error(error):
+                return False, error, ""
+            plan = sections.plan_retry(attempt, job.mode)
+            if plan is None:
+                return False, error, ""
+            log.info("job %s: transient failure on attempt %s — retrying in %ss%s",
+                     job.id, attempt, plan["delay"],
+                     f" via {plan['client']}" if plan["client"] else "")
+            if on_progress:
+                # 0.0 resets the stale bar from the failed attempt
+                on_progress(0.0, "retrying")
+            if not self._sleep_unless_canceled(job, plan["delay"]):
+                return False, "canceled", ""
+            if plan["try_fallback"]:
+                duration = prefetch.fetch_duration(ytdlp, job.url, cookies_browser=cookies)
+                # the probe isn't a registered subprocess, so a cancel pressed
+                # while it ran must be honored here — before the big download
+                if job.cancel_requested:
+                    return False, "canceled", ""
+                if duration is not None and duration <= sections.FALLBACK_MAX_DURATION:
+                    ok, error, final = self._run_fallback(
+                        job, ytdlp, ffmpeg, out_dir, path, quality, accurate,
+                        cookies, on_progress,
+                    )
+                    if ok:
+                        break
+                    return False, ("canceled" if job.cancel_requested else error), ""
+                # video too long (or length unknown) for the fallback — the
+                # loop continues into one plain final attempt instead
+            client = plan["client"]
+
+        if cfg.get("compat_transcode", True):
+            final, cerr = self._ensure_compat(job, Path(final), ffmpeg, on_progress)
+            if cerr == "canceled":
+                Path(final).unlink(missing_ok=True)
+                return False, "canceled", ""
+        log.info("job %s done: %s", job.id, final)
+        return True, "", str(final)
+
+    def _attempt(self, job, argv, path, on_progress):
+        """One yt-dlp run. Returns (ok, error, final_path)."""
         log.info("job %s argv: %s", job.id, " ".join(argv))
         try:
             proc = subprocess.Popen(
@@ -87,18 +143,84 @@ class DownloadRunner:
         if rc == 0:
             final = path if path.exists() else self._find_output(path)
             if final:
-                if cfg.get("compat_transcode", True):
-                    final, cerr = self._ensure_compat(job, Path(final), ffmpeg, on_progress)
-                    if cerr == "canceled":
-                        Path(final).unlink(missing_ok=True)
-                        return False, "canceled", ""
-                log.info("job %s done: %s", job.id, final)
                 return True, "", str(final)
             return False, "yt-dlp finished but produced no output file", ""
         self._cleanup_partials(path)
         error = self._summarize_error(stderr_tail, rc)
         log.warning("job %s failed rc=%s: %s", job.id, rc, error)
         return False, error, ""
+
+    def _run_fallback(self, job, ytdlp, ffmpeg, out_dir, path, quality,
+                      accurate, cookies, on_progress):
+        """Last rung for segments: download the whole video with yt-dlp's
+        native downloader (which survives the 403s that kill ffmpeg's URL
+        fetch), then cut the requested section locally. The temp file lives in
+        a hidden subfolder the Premiere watcher never lists."""
+        if job.cancel_requested:
+            return False, "canceled", ""
+        log.info("job %s: falling back to full download + local cut", job.id)
+        tmp_dir = Path(out_dir) / ".fg-tmp"
+        try:
+            tmp_dir.mkdir(exist_ok=True)
+        except OSError as exc:
+            return False, f"fallback temp folder unavailable: {exc}", ""
+        tmp_path = tmp_dir / (path.stem + ".full.mp4")
+        try:
+            argv = sections.build_download_args(
+                url=job.url, out_path=tmp_path, quality=quality, mode="full",
+                cookies_browser=cookies, ytdlp_path=ytdlp, ffmpeg_path=ffmpeg,
+            )
+        except ValueError as exc:
+            return False, str(exc), ""
+        ok, error, full_path = self._attempt(job, argv, tmp_path, on_progress)
+        if not ok:
+            self._cleanup_fallback_tmp(tmp_path)
+            return False, error, ""
+
+        if on_progress:
+            on_progress(None, "processing")
+        cut_argv = sections.build_local_cut_args(
+            ffmpeg, full_path, path, job.start, job.end, accurate=accurate,
+        )
+        try:
+            proc = subprocess.Popen(
+                cut_argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            self._cleanup_fallback_tmp(tmp_path, full_path)
+            return False, f"could not start ffmpeg: {exc}", ""
+        self._register(job.id, proc)
+        try:
+            rc = proc.wait()
+        finally:
+            self._unregister(job.id)
+        self._cleanup_fallback_tmp(tmp_path, full_path)
+        if job.cancel_requested:
+            Path(path).unlink(missing_ok=True)
+            return False, "canceled", ""
+        if rc == 0 and Path(path).exists():
+            return True, "", str(path)
+        Path(path).unlink(missing_ok=True)
+        return False, "local section cut failed", ""
+
+    @staticmethod
+    def _cleanup_fallback_tmp(tmp_path, full_path=None):
+        for p in (tmp_path, full_path):
+            if p:
+                Path(p).unlink(missing_ok=True)
+        try:
+            Path(tmp_path).parent.rmdir()  # only succeeds when empty
+        except OSError:
+            pass
+
+    @staticmethod
+    def _sleep_unless_canceled(job, seconds):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if job.cancel_requested:
+                return False
+            time.sleep(0.2)
+        return True
 
     def cancel(self, job_id):
         """Terminate the subprocess for a running job, escalating to SIGKILL."""

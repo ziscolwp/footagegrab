@@ -166,6 +166,15 @@ class RunnerMetadataIntegration(unittest.TestCase):
         date = _time.strftime("%Y-%m-%d")
         self.assertEqual(path.name, f"twitter_{date}_twitter.mp4")
 
+    def test_parse_duration_output(self):
+        from footagegrab.prefetch import parse_duration_output
+        self.assertEqual(parse_duration_output("152.366\n"), 152.366)
+        self.assertEqual(parse_duration_output("[youtube] extracting\n913\n"), 913.0)
+        self.assertIsNone(parse_duration_output("NA\n"))
+        self.assertIsNone(parse_duration_output(""))
+        self.assertIsNone(parse_duration_output(None))
+        self.assertIsNone(parse_duration_output("not a number"))
+
     def test_plan_path_site_token_with_real_metadata(self):
         runner, job = self._runner_and_job(
             url="https://www.reddit.com/r/videos/comments/a/b/",

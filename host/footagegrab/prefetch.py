@@ -82,6 +82,37 @@ def fetch_metadata(ytdlp_path, url, cookies_browser=None, timeout=DEFAULT_TIMEOU
     return parse_print_output(proc.stdout)
 
 
+def parse_duration_output(text):
+    """Parse `--print %(duration)s` stdout into seconds. None if unknown."""
+    for line in reversed(str(text or "").strip().splitlines()):
+        line = line.strip()
+        if not line or line == "NA":
+            continue
+        try:
+            return float(line)
+        except ValueError:
+            continue
+    return None
+
+
+def fetch_duration(ytdlp_path, url, cookies_browser=None, timeout=DEFAULT_TIMEOUT):
+    """Video duration in seconds via a simulate run, or None. Used to decide
+    whether the full-download fallback is affordable."""
+    argv = [str(ytdlp_path), "--no-playlist", "--print", "%(duration)s"]
+    if cookies_browser and cookies_browser != "none":
+        argv += ["--cookies-from-browser", cookies_browser]
+    argv.append(str(url))
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, errors="replace", timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return parse_duration_output(proc.stdout)
+
+
 def hint_for_error(text):
     """A human next-step for login-walled downloads, or empty string."""
     lowered = str(text or "").lower()
