@@ -151,13 +151,33 @@ class DeliverAndSweepTests(unittest.TestCase):
             found = runner.DownloadRunner._find_output(target)
             self.assertEqual(found, stage / "clip.full.mkv")
 
+    @staticmethod
+    def _age(path, seconds):
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
     def test_sweep_removes_leftover_staging_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)
             stage = config.ensure_stage_dir(dest)
-            (stage / "orphan.mp4.part").write_bytes(b"junk")
+            orphan = stage / "orphan.mp4.part"
+            orphan.write_bytes(b"junk")
+            self._age(orphan, runner.STAGE_SWEEP_MIN_AGE + 60)
             runner.sweep_stage_dir(dest)
             self.assertFalse(stage.exists())
+
+    def test_sweep_spares_files_a_draining_host_may_still_be_writing(self):
+        # A browser reconnect spawns a fresh host while the old one drains
+        # in-flight jobs for up to an hour. A fresh file in the shared local
+        # staging root can therefore belong to a *live* download in another
+        # process — sweeping it would silently kill that job.
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            stage = config.ensure_stage_dir(dest)
+            inflight = stage / "downloading.mp4.part"
+            inflight.write_bytes(b"live bytes")
+            runner.sweep_stage_dir(dest)
+            self.assertTrue(inflight.exists())
 
     def test_sweep_also_removes_a_legacy_in_destination_staging_folder(self):
         # Older builds staged inside the destination; a crash there must
@@ -166,13 +186,28 @@ class DeliverAndSweepTests(unittest.TestCase):
             dest = Path(tmp)
             legacy = dest / config.STAGE_DIR_NAME
             legacy.mkdir()
-            (legacy / "orphan.mp4.part").write_bytes(b"junk")
+            orphan = legacy / "orphan.mp4.part"
+            orphan.write_bytes(b"junk")
+            self._age(orphan, runner.STAGE_SWEEP_MIN_AGE + 60)
             runner.sweep_stage_dir(dest)
             self.assertFalse(legacy.exists())
+
+    def test_sweep_without_a_destination_still_clears_the_local_root(self):
+        # The local root is destination-independent: an unreachable selected
+        # destination (unmounted drive) must not stop its cleanup.
+        dest = Path(self.home.name) / "unrelated"
+        dest.mkdir()
+        stage = config.ensure_stage_dir(dest)
+        orphan = stage / "orphan.mp4.part"
+        orphan.write_bytes(b"junk")
+        self._age(orphan, runner.STAGE_SWEEP_MIN_AGE + 60)
+        runner.sweep_stage_dir(None)
+        self.assertFalse(stage.exists())
 
     def test_sweep_is_safe_when_there_is_nothing_to_sweep(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner.sweep_stage_dir(Path(tmp))  # must not raise
+        runner.sweep_stage_dir(None)  # must not raise either
 
 
 STUB_NOOP = """#!/bin/bash

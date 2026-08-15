@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from footagegrab import config  # noqa: E402
+from footagegrab import config, runner  # noqa: E402
 from footagegrab.router import Router  # noqa: E402
 
 HOST = Path(__file__).resolve().parents[1] / "footagegrab_host.py"
@@ -276,7 +276,12 @@ class HostE2ETests(unittest.TestCase):
         dest.mkdir()
         stage = dest / ".fg-tmp"
         stage.mkdir()
-        (stage / "orphan.mp4.part").write_bytes(b"junk")
+        orphan = stage / "orphan.mp4.part"
+        orphan.write_bytes(b"junk")
+        # Old enough to count as a crash leftover — fresh files are spared
+        # in case a draining sibling host is still writing them.
+        old = time.time() - (runner.STAGE_SWEEP_MIN_AGE + 60)
+        os.utime(orphan, (old, old))
         (home2 / "config.json").write_text(json.dumps({
             "destinations": [{"id": "d1", "label": "footage", "path": str(dest)}],
             "destination_id": "d1",

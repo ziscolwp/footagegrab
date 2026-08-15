@@ -61,9 +61,17 @@ def main():
     # validate_output_dir, and this must never stop the host from starting up
     # and answering messages.
     try:
+        out_dir = None
         startup_cfg = config.load()
         if config.selected_destination(startup_cfg):
-            sweep_stage_dir(config.validate_output_dir(startup_cfg))
+            try:
+                out_dir = config.validate_output_dir(startup_cfg)
+            except Exception:
+                # The local staging root is destination-independent — an
+                # unmounted destination must not block its cleanup.
+                log.warning("selected destination unavailable at startup",
+                            exc_info=True)
+        sweep_stage_dir(out_dir)
     except Exception:
         log.warning("could not sweep the staging folder at startup", exc_info=True)
 

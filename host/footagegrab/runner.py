@@ -5,7 +5,6 @@ import collections
 import logging
 import os
 import re
-import shutil
 import subprocess
 import threading
 import time
@@ -25,20 +24,43 @@ _FINAL_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4a"}
 _INTERMEDIATE_MARKERS = (".full.", ".h264tmp.")
 
 
-def sweep_stage_dir(out_dir):
-    """Remove staging left by a crash: the local staging root and any
-    legacy/fallback folder inside the destination. Safe when absent.
+# A reconnect spawns a fresh host while the previous one may keep draining
+# in-flight jobs for up to footagegrab_host.DRAIN_TIMEOUT (3600s), and both
+# share the local staging root — so only files at least this old can safely
+# be treated as crash leftovers rather than a live download's bytes.
+STAGE_SWEEP_MIN_AGE = 3600
 
-    Nothing staged is resumable (yt-dlp re-extracts on every run), and this
-    runs before any job starts, so clearing the whole local root — not just
-    this destination's slice — is safe and also drops slices left behind by
-    since-removed destinations.
+
+def sweep_stage_dir(out_dir=None):
+    """Remove staging left by a crash: settled files in the local staging
+    root and, when a destination is given, in its legacy/fallback in-
+    destination folder. Safe when absent.
+
+    Nothing staged is resumable (yt-dlp re-extracts on every run), but a
+    fresh file may belong to a still-draining sibling host process, so only
+    files untouched for STAGE_SWEEP_MIN_AGE are removed; emptied folders go
+    with them. Younger leftovers get swept by a later startup instead.
     """
-    for stage in (Path(out_dir) / config.STAGE_DIR_NAME, config.stage_root()):
+    targets = [config.stage_root()]
+    if out_dir is not None:
+        targets.append(Path(out_dir) / config.STAGE_DIR_NAME)
+    now = time.time()
+    for stage in targets:
         if not stage.is_dir():
             continue
         try:
-            shutil.rmtree(stage)
+            for root, _dirs, files in os.walk(stage, topdown=False):
+                for name in files:
+                    p = Path(root) / name
+                    try:
+                        if now - p.stat().st_mtime >= STAGE_SWEEP_MIN_AGE:
+                            p.unlink()
+                    except OSError:
+                        pass
+                try:
+                    Path(root).rmdir()  # only an emptied folder succeeds
+                except OSError:
+                    pass
         except OSError:
             log.warning("could not sweep %s", stage, exc_info=True)
 
