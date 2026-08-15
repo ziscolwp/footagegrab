@@ -351,6 +351,28 @@ class RunEndToEndTests(unittest.TestCase):
             stage = dest / ".fg-tmp"
             self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
 
+    def test_destination_override_on_the_job_redirects_the_delivered_file(self):
+        # d1 stays the config's *selected* destination throughout — only the
+        # job's own destination_id should determine where the file lands.
+        # Asserting the override actually redirects (not just that the field
+        # survives to_dict()) is what distinguishes "honoured" from "ignored".
+        with tempfile.TemporaryDirectory() as d1, \
+             tempfile.TemporaryDirectory() as d2, \
+             tempfile.TemporaryDirectory() as tools:
+            dest1, dest2 = Path(d1), Path(d2)
+            stub = Path(tools) / "ytdlp-stub"
+            _write_stub(stub, STUB_SLOW_SUCCESS, sleep=0)
+            cfg = _base_cfg(d1, stub, "/bin/ls")
+            cfg["destinations"].append({"id": "d2", "label": "other", "path": d2})
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="full", destination_id="d2")
+            ok, error, final = r.run(job)
+            self.assertTrue(ok, error)
+            final_path = Path(final)
+            self.assertEqual(final_path.parent, dest2)
+            self.assertEqual(list(dest1.glob("*.mp4")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -208,6 +208,20 @@ class HostE2ETests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["jobs"][0]["destination_id"], a["id"])
 
+    def test_enqueue_rejects_an_unknown_destination_override(self):
+        # config.selected_destination falls back to entries[0] when the
+        # selected id doesn't match anything — fine for the config's own
+        # destination_id, but an *override* that doesn't match a real
+        # destination must fail loudly rather than silently redirect to
+        # destination #1.
+        config.add_destination(str(Path(self.tmp.name) / "a"))
+        reply = self.router.handle({
+            "id": 1, "type": "enqueue", "mode": "full",
+            "url": "https://youtube.com/watch?v=abc", "destination_id": "nope",
+        })
+        self.assertFalse(reply["ok"])
+        self.assertIn("nope", reply["error"])
+
     def test_enqueue_refuses_when_no_destination_is_set(self):
         # Same reason as test_remove_destination_reports_the_new_selection:
         # the fixture's config.json migrates a legacy destination in, so it
@@ -220,6 +234,10 @@ class HostE2ETests(unittest.TestCase):
         self.assertFalse(reply["ok"])
         self.assertIn("no destination set", reply["error"])
 
+    @unittest.skipIf(
+        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        "chmod(0o500) is a no-op on Windows, and W_OK is always true for root",
+    )
     def test_enqueue_refuses_an_unwritable_destination_and_names_it(self):
         blocked = Path(self.tmp.name) / "blocked"
         blocked.mkdir()
@@ -232,6 +250,49 @@ class HostE2ETests(unittest.TestCase):
             self.assertIn(str(blocked), reply["error"])
         finally:
             blocked.chmod(0o700)
+
+    def test_startup_sweep_failure_does_not_block_boot(self):
+        # A malformed stored path (an embedded NUL byte) makes
+        # config.ensure_output_dir raise ValueError, not OSError. The startup
+        # sweep in footagegrab_host.py must be best-effort against any
+        # exception, or the host dies before answering a single message and
+        # the user just sees a dead extension.
+        home2 = Path(self.tmp.name) / "home2"
+        home2.mkdir()
+        bad_path = "/tmp/x" + chr(0) + "y"
+        (home2 / "config.json").write_text(json.dumps({
+            "destinations": [{"id": "d1", "label": "bad", "path": bad_path}],
+            "destination_id": "d1",
+        }))
+        env = dict(os.environ, FOOTAGEGRAB_HOME=str(home2))
+        proc = subprocess.Popen(
+            [sys.executable, str(HOST)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+        )
+        try:
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host crashed before sending hello")
+            (length,) = struct.unpack("<I", header)
+            hello = json.loads(proc.stdout.read(length).decode())
+            self.assertEqual(hello.get("type"), "hello")
+
+            # get_config, not ping: ping's reply folds in system.health(),
+            # which has this same OSError-only gap independently of the
+            # startup sweep — using it here would fail for an unrelated
+            # reason instead of proving the host booted.
+            proc.stdin.write(frame({"id": 1, "type": "get_config"}))
+            proc.stdin.flush()
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host closed the pipe before answering a message")
+            (length,) = struct.unpack("<I", header)
+            reply = json.loads(proc.stdout.read(length).decode())
+            self.assertTrue(reply.get("ok"), reply)
+        finally:
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 if __name__ == "__main__":

@@ -91,8 +91,15 @@ class Router:
         if not url.startswith(("http://", "https://")):
             raise AppError("missing or invalid video URL")
         cfg_now = config.load()
-        override = str(msg.get("destination_id") or "")
+        override = str(msg.get("destination_id") or "")[:16]
         if override:
+            # config.selected_destination falls back to the first entry when
+            # its id doesn't match anything — correct for the config's own
+            # destination_id, but a per-job override that names no real
+            # destination must fail loudly instead of silently landing in
+            # destination #1.
+            if not any(d["id"] == override for d in config.destinations(cfg_now)):
+                raise AppError(f"unknown destination: {override}")
             cfg_now = dict(cfg_now, destination_id=override)
         if not config.selected_destination(cfg_now):
             raise AppError("no destination set — add a folder in the extension first")
@@ -107,7 +114,7 @@ class Router:
             "site": prefetch.site_from_url(url),
             "source": str(msg.get("source") or "player")[:24],
             "custom_name": str(msg.get("custom_name") or "").strip()[:80],
-            "destination_id": str(msg.get("destination_id") or "")[:16],
+            "destination_id": override,
         }
         mode = msg.get("mode") or ("segments" if msg.get("segments") else "full")
         jobs = []
