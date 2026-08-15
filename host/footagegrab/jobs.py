@@ -35,7 +35,8 @@ class InvalidTransition(Exception):
 class Job:
     def __init__(self, *, url, video_id="", title="", mode="full", start=None,
                  end=None, group=None, quality=None, accurate=None, attempts=1,
-                 site="", source="player", custom_name="", n=None):
+                 site="", source="player", custom_name="", n=None,
+                 destination_id=""):
         self.id = f"j{next(_seq)}-{int(time.time() * 1000) % 100000000}"
         self.group = group or self.id
         self.url = url
@@ -45,6 +46,7 @@ class Job:
         self.source = source  # player | context_menu | adapter | toolbar
         self.custom_name = custom_name  # user-typed name; wins over title
         self.n = n  # per-video sequence number ({n} token), set at enqueue
+        self.destination_id = str(destination_id or "")  # per-job override; "" -> use config
         self.mode = mode  # full | segment
         self.start = start
         self.end = end
@@ -72,7 +74,8 @@ class Job:
                    mode=self.mode, start=self.start, end=self.end, group=self.group,
                    quality=self.quality, accurate=self.accurate,
                    attempts=self.attempts + 1, site=self.site, source=self.source,
-                   custom_name=self.custom_name, n=self.n)
+                   custom_name=self.custom_name, n=self.n,
+                   destination_id=self.destination_id)
 
     def to_dict(self):
         return {
@@ -80,6 +83,7 @@ class Job:
             "video_id": self.video_id, "title": self.title, "mode": self.mode,
             "site": self.site, "source": self.source,
             "custom_name": self.custom_name, "n": self.n,
+            "destination_id": self.destination_id,
             "start": self.start, "end": self.end, "state": self.state,
             "progress": round(self.progress, 3), "stage": self.stage,
             "file": self.file, "error": self.error, "attempts": self.attempts,

@@ -24,7 +24,9 @@ class Router:
             "ping": self._ping,
             "get_config": self._get_config,
             "set_config": self._set_config,
-            "choose_folder": self._choose_folder,
+            "add_destination": self._add_destination,
+            "set_destination": self._set_destination,
+            "remove_destination": self._remove_destination,
             "enqueue": self._enqueue,
             "jobs": self._jobs,
             "cancel": self._cancel,
@@ -65,17 +67,46 @@ class Router:
         cfg, errors = config.update(msg.get("patch") or {})
         return {"config": cfg, "errors": errors}
 
-    def _choose_folder(self, msg):
+    def _add_destination(self, msg):
         path, error = system.choose_folder()
         if path is None:
             raise AppError(error if error != "canceled" else "canceled")
-        cfg, errors = config.update({"output_dir": path})
-        return {"config": cfg, "errors": errors, "path": path}
+        cfg, entry = config.add_destination(path, label=msg.get("label") or "")
+        return {"config": cfg, "destination": entry}
+
+    def _set_destination(self, msg):
+        cfg, error = config.select_destination(str(msg.get("dest_id") or ""))
+        if error:
+            raise AppError(error)
+        return {"config": cfg}
+
+    def _remove_destination(self, msg):
+        cfg, error = config.remove_destination(str(msg.get("dest_id") or ""))
+        if error:
+            raise AppError(error)
+        return {"config": cfg}
 
     def _enqueue(self, msg):
         url = str(msg.get("url") or "").strip()
         if not url.startswith(("http://", "https://")):
             raise AppError("missing or invalid video URL")
+        cfg_now = config.load()
+        override = str(msg.get("destination_id") or "")[:16]
+        if override:
+            # config.selected_destination falls back to the first entry when
+            # its id doesn't match anything — correct for the config's own
+            # destination_id, but a per-job override that names no real
+            # destination must fail loudly instead of silently landing in
+            # destination #1.
+            if not any(d["id"] == override for d in config.destinations(cfg_now)):
+                raise AppError(f"unknown destination: {override}")
+            cfg_now = dict(cfg_now, destination_id=override)
+        if not config.selected_destination(cfg_now):
+            raise AppError("no destination set — add a folder in the extension first")
+        try:
+            config.validate_output_dir(cfg_now)
+        except OSError as exc:
+            raise AppError(f"destination unavailable: {exc}") from None
         common = {
             "url": url,
             "video_id": str(msg.get("video_id") or "")[:32],
@@ -83,6 +114,7 @@ class Router:
             "site": prefetch.site_from_url(url),
             "source": str(msg.get("source") or "player")[:24],
             "custom_name": str(msg.get("custom_name") or "").strip()[:80],
+            "destination_id": override,
         }
         mode = msg.get("mode") or ("segments" if msg.get("segments") else "full")
         jobs = []
@@ -147,8 +179,9 @@ class Router:
 
     def _open_folder(self, msg):
         cfg = config.load()
-        # effective folder, not raw output_dir — while the Premiere panel owns
-        # the target, "Open folder" must open where grabs actually land
+        # effective folder, resolved from the selected destination — that is
+        # the source of truth, so "Open folder" must resolve it the same way
+        # the download path does, not open something stale
         path = msg.get("path") or os.path.expanduser(config.effective_output_dir(cfg))
         ok, error = system.open_folder(path)
         if not ok:

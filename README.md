@@ -53,8 +53,9 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 4. **Fully restart the browser** (⌘Q — a normal window close is not enough for
    Chrome to pick up native host registrations).
 
-5. Click the FootageGrab toolbar icon → **Settings** → **Choose folder…** and
-   point it at your Premiere project's footage folder.
+5. Click the FootageGrab toolbar icon → **Settings** → **Add folder** and
+   point it at your Premiere project's footage folder. You can save several
+   folders and switch between them.
 
 6. **Premiere panel** (optional but recommended):
 
@@ -72,6 +73,10 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 > update, hit **Reload** on `chrome://extensions`.
 
 ## Install (Windows)
+
+> **Full runbook:** [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) — step-by-step
+> with verification after each step, written so you can hand it to any AI
+> agent ("follow INSTALL-WINDOWS.md") or walk through it manually.
 
 1. **Python 3** — [python.org/downloads](https://www.python.org/downloads/),
    and tick **"Add python.exe to PATH"** in the installer.
@@ -97,7 +102,7 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 6. **Premiere panel**: double-click `install\install-premiere.bat`, restart
    Premiere, open **Window → Extensions → FootageGrab Bridge**.
 
-7. Click the FootageGrab toolbar icon → **Settings** → **Choose folder…**.
+7. Click the FootageGrab toolbar icon → **Settings** → **Add folder**.
 
 Windows notes: the Premiere-safe H.264 conversion uses NVENC on NVIDIA GPUs
 and falls back to CPU x264 (slower than the Mac hardware path, same quality).
@@ -170,7 +175,7 @@ downloads anyway.
 
 | Setting | Notes |
 |---|---|
-| Footage folder | Where files land. Native folder picker (the popup closes while it's open — reopen to confirm). |
+| Destination | Where files land. A dropdown of saved footage folders; add one with the native folder picker (the popup closes while it's open — reopen to confirm) or remove the selected one. |
 | Quality | **Max (4K+)** grabs the highest resolution the video has. YouTube ships 4K+ only as VP9/AV1, so those are auto-converted (below). 1080p / 720p stick to native H.264 — fastest, never converted. |
 | Premiere-safe H.264 | ON (default): VP9/AV1 downloads are converted to high-bitrate H.264 (50 Mbps at 4K) with the Mac's hardware encoder — a 4K clip converts in seconds on Apple Silicon. OFF: keep the original codec. |
 | Accurate cut | ON: re-encodes at the cuts so In/Out are frame-trustworthy. OFF: stream copy — starts/ends snap to keyframes (± a few seconds, fine for rough B-roll). |

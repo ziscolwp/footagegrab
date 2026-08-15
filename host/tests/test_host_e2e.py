@@ -11,6 +11,11 @@ import time
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from footagegrab import config, runner  # noqa: E402
+from footagegrab.router import Router  # noqa: E402
+
 HOST = Path(__file__).resolve().parents[1] / "footagegrab_host.py"
 
 STUB_YTDLP = """#!/bin/bash
@@ -34,6 +39,18 @@ def frame(message):
     return struct.pack("<I", len(data)) + data
 
 
+class _FakeQueue:
+    """Records submitted jobs without running them — enough for router tests
+    that only need to inspect the reply, not watch a job finish."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, job):
+        self.jobs.append(job)
+        return job
+
+
 class HostE2ETests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -53,8 +70,19 @@ class HostE2ETests(unittest.TestCase):
             [sys.executable, str(HOST)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
         )
+        # A separate in-process Router against the same FOOTAGEGRAB_HOME, for
+        # tests that check message handling directly rather than round-trip
+        # through the subprocess pipe.
+        self._old_home = os.environ.get("FOOTAGEGRAB_HOME")
+        os.environ["FOOTAGEGRAB_HOME"] = str(home)
+        self.queue = _FakeQueue()
+        self.router = Router(self.queue, runner=None)
 
     def tearDown(self):
+        if self._old_home is None:
+            os.environ.pop("FOOTAGEGRAB_HOME", None)
+        else:
+            os.environ["FOOTAGEGRAB_HOME"] = self._old_home
         if self.proc.stdin and not self.proc.stdin.closed:
             self.proc.stdin.close()
         try:
@@ -138,6 +166,189 @@ class HostE2ETests(unittest.TestCase):
                 self.assertTrue(msg["ok"])
                 self.assertEqual(len(msg["history"]), 2)
                 break
+
+    # -- destination selection messages (router, in-process) ----------------
+
+    def test_set_destination_selects_an_existing_folder(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        reply = self.router.handle({"id": 1, "type": "set_destination", "dest_id": a["id"]})
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["config"]["destination_id"], a["id"])
+
+    def test_set_destination_rejects_an_unknown_id(self):
+        reply = self.router.handle({"id": 1, "type": "set_destination", "dest_id": "nope"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("unknown destination", reply["error"])
+
+    def test_remove_destination_reports_the_new_selection(self):
+        # This fixture's config.json already migrated a legacy output_dir into
+        # one destination (see setUp) — clear it first so "the new selection"
+        # unambiguously means the one this test adds, not that leftover entry.
+        (Path(self.tmp.name) / "config.json").write_text(json.dumps({
+            "destinations": [], "destination_id": "",
+        }))
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        reply = self.router.handle({"id": 1, "type": "remove_destination", "dest_id": b["id"]})
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["config"]["destination_id"], a["id"])
+
+    def test_choose_folder_message_is_gone(self):
+        reply = self.router.handle({"id": 1, "type": "choose_folder"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("unknown message type", reply["error"])
+
+    def test_enqueue_carries_a_per_job_destination_override(self):
+        folder = Path(self.tmp.name) / "a"
+        folder.mkdir()
+        cfg, a = config.add_destination(str(folder))
+        reply = self.router.handle({
+            "id": 1, "type": "enqueue", "mode": "full",
+            "url": "https://youtube.com/watch?v=abc", "destination_id": a["id"],
+        })
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["jobs"][0]["destination_id"], a["id"])
+
+    def test_enqueue_rejects_an_unknown_destination_override(self):
+        # config.selected_destination falls back to entries[0] when the
+        # selected id doesn't match anything — fine for the config's own
+        # destination_id, but an *override* that doesn't match a real
+        # destination must fail loudly rather than silently redirect to
+        # destination #1.
+        config.add_destination(str(Path(self.tmp.name) / "a"))
+        reply = self.router.handle({
+            "id": 1, "type": "enqueue", "mode": "full",
+            "url": "https://youtube.com/watch?v=abc", "destination_id": "nope",
+        })
+        self.assertFalse(reply["ok"])
+        self.assertIn("nope", reply["error"])
+
+    def test_enqueue_refuses_when_no_destination_is_set(self):
+        # Same reason as test_remove_destination_reports_the_new_selection:
+        # the fixture's config.json migrates a legacy destination in, so it
+        # must be cleared explicitly for this to test an empty list.
+        (Path(self.tmp.name) / "config.json").write_text(json.dumps({
+            "destinations": [], "destination_id": "",
+        }))
+        reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                    "url": "https://youtube.com/watch?v=abc"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("no destination set", reply["error"])
+
+    @unittest.skipIf(
+        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        "chmod(0o500) is a no-op on Windows, and W_OK is always true for root",
+    )
+    def test_enqueue_refuses_an_unwritable_destination_and_names_it(self):
+        blocked = Path(self.tmp.name) / "blocked"
+        blocked.mkdir()
+        blocked.chmod(0o500)
+        try:
+            config.add_destination(str(blocked))
+            reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                        "url": "https://youtube.com/watch?v=abc"})
+            self.assertFalse(reply["ok"])
+            self.assertIn(str(blocked), reply["error"])
+        finally:
+            blocked.chmod(0o700)
+
+    def test_enqueue_refuses_a_missing_destination_and_does_not_create_it(self):
+        # config.validate_output_dir must only check, never mkdir — creating
+        # an unmounted external-volume path here would silently redirect
+        # every future grab to the internal disk once the real drive mounts.
+        missing = Path(self.tmp.name) / "not-yet-mounted"
+        config.add_destination(str(missing))
+        reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                    "url": "https://youtube.com/watch?v=abc"})
+        self.assertFalse(reply["ok"])
+        self.assertIn(str(missing), reply["error"])
+        self.assertFalse(missing.exists(), "enqueue must not create the destination")
+
+    def test_startup_sweep_removes_a_leftover_staging_folder(self):
+        # Happy-path counterpart to test_startup_sweep_failure_does_not_block_
+        # boot below: a real, valid destination with a .fg-tmp left behind by
+        # a crash must actually be swept on the next boot, not just fail to
+        # crash the host when the sweep itself errors out.
+        home2 = Path(self.tmp.name) / "home3"
+        home2.mkdir()
+        dest = home2 / "footage"
+        dest.mkdir()
+        stage = dest / ".fg-tmp"
+        stage.mkdir()
+        orphan = stage / "orphan.mp4.part"
+        orphan.write_bytes(b"junk")
+        # Old enough to count as a crash leftover — fresh files are spared
+        # in case a draining sibling host is still writing them.
+        old = time.time() - (runner.STAGE_SWEEP_MIN_AGE + 60)
+        os.utime(orphan, (old, old))
+        (home2 / "config.json").write_text(json.dumps({
+            "destinations": [{"id": "d1", "label": "footage", "path": str(dest)}],
+            "destination_id": "d1",
+        }))
+        env = dict(os.environ, FOOTAGEGRAB_HOME=str(home2))
+        proc = subprocess.Popen(
+            [sys.executable, str(HOST)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+        )
+        try:
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host crashed before sending hello")
+            (length,) = struct.unpack("<I", header)
+            hello = json.loads(proc.stdout.read(length).decode())
+            self.assertEqual(hello.get("type"), "hello")
+            # The sweep runs before "hello" is written, so it has already
+            # happened by the time this is observed.
+            self.assertFalse(stage.exists(), "leftover .fg-tmp must be swept at startup")
+        finally:
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    def test_startup_sweep_failure_does_not_block_boot(self):
+        # A malformed stored path (an embedded NUL byte) makes
+        # config.ensure_output_dir raise ValueError, not OSError. The startup
+        # sweep in footagegrab_host.py must be best-effort against any
+        # exception, or the host dies before answering a single message and
+        # the user just sees a dead extension.
+        home2 = Path(self.tmp.name) / "home2"
+        home2.mkdir()
+        bad_path = "/tmp/x" + chr(0) + "y"
+        (home2 / "config.json").write_text(json.dumps({
+            "destinations": [{"id": "d1", "label": "bad", "path": bad_path}],
+            "destination_id": "d1",
+        }))
+        env = dict(os.environ, FOOTAGEGRAB_HOME=str(home2))
+        proc = subprocess.Popen(
+            [sys.executable, str(HOST)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+        )
+        try:
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host crashed before sending hello")
+            (length,) = struct.unpack("<I", header)
+            hello = json.loads(proc.stdout.read(length).decode())
+            self.assertEqual(hello.get("type"), "hello")
+
+            # get_config, not ping: ping's reply folds in system.health(),
+            # which has this same OSError-only gap independently of the
+            # startup sweep — using it here would fail for an unrelated
+            # reason instead of proving the host booted.
+            proc.stdin.write(frame({"id": 1, "type": "get_config"}))
+            proc.stdin.flush()
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host closed the pipe before answering a message")
+            (length,) = struct.unpack("<I", header)
+            reply = json.loads(proc.stdout.read(length).decode())
+            self.assertTrue(reply.get("ok"), reply)
+        finally:
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ from footagegrab import __version__, config, potsidecar  # noqa: E402
 from footagegrab.jobs import TERMINAL, JobQueue  # noqa: E402
 from footagegrab.nm import NativeMessagingIO  # noqa: E402
 from footagegrab.router import Router  # noqa: E402
-from footagegrab.runner import DownloadRunner  # noqa: E402
+from footagegrab.runner import DownloadRunner, sweep_stage_dir  # noqa: E402
 
 DRAIN_TIMEOUT = 3600  # seconds to let in-flight jobs finish after disconnect
 PROGRESS_PUSH_INTERVAL = 0.5
@@ -51,6 +51,30 @@ def main():
             "pot_idle_shutdown", potsidecar.DEFAULT_IDLE_SHUTDOWN),
     )
     runner = DownloadRunner(config.load, pot=pot)
+
+    # A crash can leave a partial file in the staging folder. Nothing in there
+    # is resumable — yt-dlp re-extracts on every run — so clear it at startup.
+    # This only validates the destination (never creates it): an unmounted
+    # external volume must stay unmounted, not get silently recreated as an
+    # empty folder on the internal disk. Best-effort: a malformed stored path
+    # can raise ValueError/RuntimeError (not just OSError) out of
+    # validate_output_dir, and this must never stop the host from starting up
+    # and answering messages.
+    try:
+        out_dir = None
+        startup_cfg = config.load()
+        if config.selected_destination(startup_cfg):
+            try:
+                out_dir = config.validate_output_dir(startup_cfg)
+            except Exception:
+                # The local staging root is destination-independent — an
+                # unmounted destination must not block its cleanup.
+                log.warning("selected destination unavailable at startup",
+                            exc_info=True)
+        sweep_stage_dir(out_dir)
+    except Exception:
+        log.warning("could not sweep the staging folder at startup", exc_info=True)
+
     recorded = set()  # job ids already appended to history
     last_push = {}  # job id -> monotonic time of last progress push
 

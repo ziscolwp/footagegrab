@@ -55,6 +55,10 @@ class EnqueueNumbering(unittest.TestCase):
         os.environ["FOOTAGEGRAB_HOME"] = self._home.name
         self.addCleanup(self._home.cleanup)
         self.addCleanup(os.environ.pop, "FOOTAGEGRAB_HOME", None)
+        from footagegrab import config
+        out = Path(self._home.name) / "out"
+        out.mkdir()
+        config.add_destination(str(out))
 
     def _router(self):
         from footagegrab.router import Router

@@ -29,7 +29,7 @@
     verb: $("status-verb"), path: $("status-path"), error: $("status-error"),
     hint: $("status-hint"),
     bin: $("bin-name"), dir: $("dir-override"),
-    insert: $("insert-toggle"), follow: $("follow-toggle"),
+    insert: $("insert-toggle"),
     pause: $("pause-btn"), scan: $("scan-btn"), recent: $("recent"),
   };
 
@@ -50,7 +50,6 @@
   var dirOverride = settings.dir || "";
   var paused = !!settings.paused;
   var insertToTimeline = settings.insert !== false; // default ON
-  var followProject = settings.followProject !== false; // default ON
   // Rotation offset for per-clip color labels; the jsx side mods it into its
   // palette, so this only needs to keep counting (capped to stay small).
   var labelCounter = Number(settings.labelIdx) || 0;
@@ -71,7 +70,6 @@
     saveJSON("fg_settings", {
       bin: binName, dir: dirOverride, paused: paused,
       insert: insertToTimeline, labelIdx: labelCounter,
-      followProject: followProject,
     });
   }
 
@@ -90,7 +88,9 @@
     return p;
   }
 
-  // ---- project-relative folder ("Save next to project") ------------------
+  // ---- project path tracking ---------------------------------------------
+  // Kept for a future per-project feature; resolveDir() no longer reads it —
+  // the extension's selected destination is the single source of truth now.
 
   var projectPath = ""; // latest app.project.path reported by Premiere
 
@@ -112,75 +112,17 @@
     });
   }
 
-  // Publish (or clear, dir="") the project folder for the host: it prefers
-  // project_output_dir over the user's own output_dir while non-empty, so the
-  // extension's global folder setting is never overwritten. The claim expires
-  // host-side unless heartbeated (project_output_dir_ts, refreshed every
-  // ~HEARTBEAT_S), so quitting Premiere can't redirect grabs forever. Atomic
-  // tmp+rename write because host and extension read this file concurrently;
-  // a torn or unreadable existing file is left alone rather than risk
-  // dropping keys.
-  var HEARTBEAT_S = 30; // host tolerates 90s — three missed beats
-
-  function syncProjectDir(dir) {
-    try {
-      var cfg = null;
-      if (fs.existsSync(CONFIG_PATH)) {
-        try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch (e) { return; }
-        if (!cfg || typeof cfg !== "object") cfg = {};
-      } else {
-        if (!dir) return; // nothing to clear
-        cfg = {};
-      }
-      var now = Date.now() / 1000;
-      var sameDir = String(cfg.project_output_dir || "") === dir;
-      var ts = Number(cfg.project_output_dir_ts) || 0;
-      if (sameDir && (!dir || now - ts < HEARTBEAT_S)) return;
-      cfg.project_output_dir = dir;
-      cfg.project_output_dir_ts = dir ? now : 0;
-      if (!fs.existsSync(APP_HOME)) fs.mkdirSync(APP_HOME, { recursive: true });
-      var tmp = CONFIG_PATH + ".fgtmp-" + Math.floor(Math.random() * 1e9);
-      fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-      fs.renameSync(tmp, CONFIG_PATH);
-    } catch (e) { /* panel still watches; grabs keep their current folder */ }
-  }
-
-  // Best-effort immediate release on panel close — the heartbeat TTL covers
-  // crashes and force-quits where this never runs.
-  window.addEventListener("beforeunload", function () {
-    try { syncProjectDir(""); } catch (e) {}
-  });
-
-  // Creates only the leaf folder, and only when the project's parent folder
-  // is actually present — never re-creates an unmounted volume's path.
-  function ensureLeafDir(pdir) {
-    try {
-      if (fs.existsSync(pdir)) return fs.statSync(pdir).isDirectory();
-      var cut = Math.max(pdir.lastIndexOf("/"), pdir.lastIndexOf("\\"));
-      var parent = pdir.slice(0, cut);
-      if (!parent || !fs.existsSync(parent)) return false;
-      fs.mkdirSync(pdir);
-      return true;
-    } catch (e) { return false; }
-  }
-
-  // Priority: explicit override > project-relative (follow mode) > extension
-  // config > platform default. Re-read every tick so changing the folder in
-  // the extension popup — or switching projects — retargets automatically.
-  // Whenever the project folder is NOT the active target, the config key is
-  // cleared so downloads and the watcher can never point at different places.
+  // The extension owns the destination now; the panel follows it. A manual
+  // override still wins, for the odd case where you want to watch elsewhere.
   function resolveDir() {
-    var pdir = "";
-    if (followProject && !dirOverride) {
-      pdir = FGWatch.projectFootageDir(projectPath, "FootageGrab");
-      if (pdir && !ensureLeafDir(pdir)) pdir = "";
-    }
-    syncProjectDir(pdir);
     if (dirOverride) return expandTilde(dirOverride);
-    if (pdir) return pdir;
     try {
       var cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-      if (cfg && cfg.output_dir) return expandTilde(String(cfg.output_dir));
+      var list = (cfg && cfg.destinations) || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].id === cfg.destination_id) return expandTilde(list[i].path);
+      }
+      if (list.length && list[0].path) return expandTilde(list[0].path);
     } catch (e) { /* no config yet — fall through */ }
     return expandTilde(DEFAULT_DIR);
   }
@@ -205,7 +147,12 @@
       try {
         var st = fs.statSync(full);
         if (st.isFile()) {
-          entries.push({ name: names[i], path: full, size: st.size, mtimeMs: st.mtimeMs });
+          // A dataless cloud placeholder (Dropbox/iCloud online-only) reports
+          // its full logical size while occupying zero blocks. Importing one
+          // hands Premiere a file with no frames in it. Windows doesn't report
+          // blocks, so undefined means "can't tell" and counts as real data.
+          var hasData = typeof st.blocks === "number" ? st.blocks > 0 : true;
+          entries.push({ name: names[i], path: full, size: st.size, mtimeMs: st.mtimeMs, hasData: hasData });
         }
       } catch (e) { /* vanished mid-listing */ }
     }
@@ -434,14 +381,7 @@
   ui.bin.value = binName;
   ui.dir.value = dirOverride;
   ui.insert.checked = insertToTimeline;
-  ui.follow.checked = followProject;
   renderPause();
-
-  ui.follow.addEventListener("change", function () {
-    followProject = ui.follow.checked;
-    saveSettings();
-    tick(); // resolveDir syncs or clears project_output_dir immediately
-  });
 
   ui.insert.addEventListener("change", function () {
     insertToTimeline = ui.insert.checked;

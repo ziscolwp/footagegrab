@@ -41,14 +41,29 @@ function patch(fields) {
 
 export function paint() {
   if (!config) return;
-  // While the Premiere panel's "Save next to project" claim is live, grabs
-  // land in the project folder — show that, not the (unchanged) global one.
-  const claimTs = Number(config.project_output_dir_ts) || 0;
-  const claimLive = config.project_output_dir &&
-    Math.abs(Date.now() / 1000 - claimTs) <= 90;
-  $("folder-path").textContent = claimLive
-    ? `${config.project_output_dir} (set by Premiere project)`
-    : (config.output_dir || "—");
+  const select = $("destination-select");
+  const dests = Array.isArray(config.destinations) ? config.destinations : [];
+  select.innerHTML = "";
+  for (const d of dests) {
+    const opt = document.createElement("option");
+    opt.value = d.id;
+    opt.textContent = `${d.label} — ${d.path}`;
+    select.appendChild(opt);
+  }
+  if (dests.length) {
+    // Fall back to the first entry when destination_id names no option —
+    // matches config.selected_destination's fallback host-side, so the
+    // dropdown always shows the folder a grab would actually use instead of
+    // rendering blank for a stale id.
+    const known = dests.some(d => d.id === config.destination_id);
+    select.value = known ? config.destination_id : dests[0].id;
+  } else {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No folder set — add one";
+    select.appendChild(opt);
+  }
+  $("remove-destination").disabled = dests.length === 0;
   for (const b of $("quality-seg").querySelectorAll("button")) {
     b.classList.toggle("active", b.dataset.q === config.quality);
   }
@@ -77,13 +92,27 @@ export function setConfig(cfg) {
 }
 
 export function wire() {
-  $("choose-folder").addEventListener("click", async () => {
+  $("destination-select").addEventListener("change", async e => {
+    if (!e.target.value) return;
+    const res = await host({ type: "set_destination", dest_id: e.target.value }).catch(() => null);
+    if (res?.ok) { config = res.config; paint(); markSaved(); }
+  });
+
+  $("add-destination").addEventListener("click", () => {
     // The native picker steals focus, which closes this popup; the host still
     // saves the chosen folder — the hint text tells the user to reopen.
-    host({ type: "choose_folder" }, 240000).then(res => {
+    host({ type: "add_destination" }, 240000).then(res => {
       if (res?.ok) { config = res.config; paint(); markSaved(); }
     });
   });
+
+  $("remove-destination").addEventListener("click", async () => {
+    const id = $("destination-select").value;
+    if (!id) return;
+    const res = await host({ type: "remove_destination", dest_id: id }).catch(() => null);
+    if (res?.ok) { config = res.config; paint(); markSaved(); }
+  });
+
   $("open-folder").addEventListener("click", () => host({ type: "open_folder" }));
 
   $("quality-seg").addEventListener("click", e => {

@@ -12,6 +12,36 @@ def _run(argv, timeout):
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
 
 
+def mark_cloud_ignored(path):
+    """Tell Dropbox to skip this folder. Best effort — returns True if marked.
+
+    macOS uses an extended attribute; Windows the same-named alternate data
+    stream. Failure is not fatal: delivery is still atomic, the temp folder
+    just syncs.
+
+    macOS note: CPython's os.setxattr is Linux-only (not exposed on Darwin),
+    so the attribute is written via the `xattr` CLI that ships with macOS
+    instead. Invoked by absolute path (/usr/bin/xattr): config.augment_path()
+    prepends /opt/homebrew/bin to PATH for yt-dlp/ffmpeg resolution, and a
+    Homebrew-installed xattr would otherwise shadow the system one.
+    """
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        if sys.platform == "darwin":
+            proc = _run(["/usr/bin/xattr", "-w", "com.dropbox.ignored", "1", str(path)],
+                        timeout=10)
+            return proc.returncode == 0
+        if sys.platform == "win32":
+            with open(f"{path}:com.dropbox.ignored", "w", encoding="ascii") as f:
+                f.write("1")
+            return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
 def reveal(path):
     """Reveal a file in Finder / Explorer. Returns (ok, error)."""
     p = Path(str(path)).expanduser()
@@ -92,12 +122,16 @@ def health(cfg):
     """Everything the popup needs to say whether grabbing will work."""
     ytdlp = config.resolve_tool("yt-dlp", cfg.get("ytdlp_path"))
     ffmpeg = config.resolve_tool("ffmpeg", cfg.get("ffmpeg_path"))
-    out = {"path": "", "exists": False, "writable": False}
+    path = Path(config.effective_output_dir(cfg)).expanduser()
     try:
-        d = config.ensure_output_dir(cfg)
-        out = {"path": str(d), "exists": True, "writable": True}
-    except OSError as exc:
-        out["path"] = str(exc)
+        config.validate_output_dir(cfg)
+        exists, writable = True, True
+    except OSError:
+        # Missing and unwritable both raise here; a folder that exists but
+        # isn't writable still reports exists so the popup doesn't tell the
+        # user to go create something that's already there.
+        exists, writable = path.is_dir(), False
+    out = {"path": str(path), "exists": exists, "writable": writable}
     return {
         "ytdlp": {"path": ytdlp or "", "version": tool_version(ytdlp) if ytdlp else "",
                   "found": bool(ytdlp)},

@@ -1,7 +1,9 @@
+# TODO: split by concern
 """Run yt-dlp for a job, stream progress, and clean up after failures."""
 
 import collections
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -15,6 +17,52 @@ log = logging.getLogger("footagegrab.runner")
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 _PROCESSING_PREFIXES = ("[Merger]", "[Fixup", "[VideoRemuxer", "[VideoConvertor")
 _FINAL_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4a"}
+# Staging-only intermediates that share the job's stem and a "final" suffix,
+# and must never be mistaken for the finished output by _find_output: the
+# fallback's whole-video temp (<stem>.full.mp4) and the compat-transcode
+# scratch file (<stem>.h264tmp.mp4).
+_INTERMEDIATE_MARKERS = (".full.", ".h264tmp.")
+
+
+# A reconnect spawns a fresh host while the previous one may keep draining
+# in-flight jobs for up to footagegrab_host.DRAIN_TIMEOUT (3600s), and both
+# share the local staging root — so only files at least this old can safely
+# be treated as crash leftovers rather than a live download's bytes.
+STAGE_SWEEP_MIN_AGE = 3600
+
+
+def sweep_stage_dir(out_dir=None):
+    """Remove staging left by a crash: settled files in the local staging
+    root and, when a destination is given, in its legacy/fallback in-
+    destination folder. Safe when absent.
+
+    Nothing staged is resumable (yt-dlp re-extracts on every run), but a
+    fresh file may belong to a still-draining sibling host process, so only
+    files untouched for STAGE_SWEEP_MIN_AGE are removed; emptied folders go
+    with them. Younger leftovers get swept by a later startup instead.
+    """
+    targets = [config.stage_root()]
+    if out_dir is not None:
+        targets.append(Path(out_dir) / config.STAGE_DIR_NAME)
+    now = time.time()
+    for stage in targets:
+        if not stage.is_dir():
+            continue
+        try:
+            for root, _dirs, files in os.walk(stage, topdown=False):
+                for name in files:
+                    p = Path(root) / name
+                    try:
+                        if now - p.stat().st_mtime >= STAGE_SWEEP_MIN_AGE:
+                            p.unlink()
+                    except OSError:
+                        pass
+                try:
+                    Path(root).rmdir()  # only an emptied folder succeeds
+                except OSError:
+                    pass
+        except OSError:
+            log.warning("could not sweep %s", stage, exc_info=True)
 
 
 class DownloadRunner:
@@ -35,16 +83,23 @@ class DownloadRunner:
         ffmpeg = config.resolve_tool("ffmpeg", cfg.get("ffmpeg_path"))
         if not ffmpeg:
             return False, "ffmpeg not found. Install it with: brew install ffmpeg", ""
+        if getattr(job, "destination_id", ""):
+            cfg = dict(cfg, destination_id=job.destination_id)
         try:
             out_dir = config.ensure_output_dir(cfg)
         except OSError as exc:
             return False, f"output folder unavailable: {exc}", ""
+        try:
+            stage_dir = config.ensure_stage_dir(out_dir)
+        except OSError as exc:
+            return False, f"staging folder unavailable: {exc}", ""
 
         quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
         cookies = cfg.get("cookies_browser")
         self._ensure_metadata(job, cfg, ytdlp, on_progress)
-        path = self._plan_path(job, cfg, out_dir, quality)
+        planned = self._plan_path(job, cfg, out_dir, quality)
+        path = stage_dir / planned.name
 
         # Transient stream failures (YouTube 403s the URLs it just issued;
         # ffmpeg exits with code 8) climb a ladder: plain run -> delayed retry
@@ -133,6 +188,11 @@ class DownloadRunner:
             if cerr == "canceled":
                 Path(final).unlink(missing_ok=True)
                 return False, "canceled", ""
+        try:
+            final = self._deliver(Path(final), out_dir)
+        except OSError as exc:
+            Path(final).unlink(missing_ok=True)
+            return False, f"could not deliver to {out_dir}: {exc}", ""
         log.info("job %s done: %s", job.id, final)
         return True, "", str(final)
 
@@ -184,13 +244,12 @@ class DownloadRunner:
         """Last rung for segments: download the whole video with yt-dlp's
         native downloader (which survives the 403s that kill ffmpeg's URL
         fetch), then cut the requested section locally. The temp file lives in
-        a hidden subfolder the Premiere watcher never lists."""
+        the staging folder, outside the watched destination."""
         if job.cancel_requested:
             return False, "canceled", ""
         log.info("job %s: falling back to full download + local cut", job.id)
-        tmp_dir = Path(out_dir) / ".fg-tmp"
         try:
-            tmp_dir.mkdir(exist_ok=True)
+            tmp_dir = config.ensure_stage_dir(out_dir)
         except OSError as exc:
             return False, f"fallback temp folder unavailable: {exc}", ""
         tmp_path = tmp_dir / (path.stem + ".full.mp4")
@@ -234,13 +293,11 @@ class DownloadRunner:
 
     @staticmethod
     def _cleanup_fallback_tmp(tmp_path, full_path=None):
+        # The staging folder is shared with other jobs (see run()) — never
+        # remove it here, only the files this fallback attempt created.
         for p in (tmp_path, full_path):
             if p:
                 Path(p).unlink(missing_ok=True)
-        try:
-            Path(tmp_path).parent.rmdir()  # only succeeds when empty
-        except OSError:
-            pass
 
     @staticmethod
     def _sleep_unless_canceled(job, seconds):
@@ -350,6 +407,21 @@ class DownloadRunner:
         stem = naming.render_template(template, fields)
         return naming.unique_path(out_dir, stem, ".mp4")
 
+    @staticmethod
+    def _deliver(staged_path, out_dir):
+        """Move a finished file out of staging. Returns its final path.
+
+        os.replace is atomic within a volume, so the destination goes from
+        "no such file" to "complete file" with nothing observable between —
+        which is what keeps Dropbox and the Premiere watcher from ever seeing
+        a partial clip. The unique name is resolved here, at delivery time,
+        because post-processing can change the extension.
+        """
+        staged_path = Path(staged_path)
+        final = naming.unique_path(out_dir, staged_path.stem, staged_path.suffix)
+        os.replace(staged_path, final)
+        return final
+
     def _register(self, job_id, proc):
         with self._lock:
             self._procs[job_id] = proc
@@ -382,9 +454,15 @@ class DownloadRunner:
     def _find_output(path):
         """yt-dlp occasionally lands on a sibling extension; find the real file."""
         stem = path.stem
+        # Markers are matched only against the part of the name after the
+        # stem: _find_output(tmp_path) is itself called with stem "<clip>.full"
+        # (the fallback's whole-video temp) or "<clip>.h264tmp" (the compat
+        # scratch file), and those legitimate stems must not disqualify their
+        # own sibling-extension candidates (e.g. "<clip>.full.mkv").
         candidates = [
             p for p in path.parent.glob(f"{stem}.*")
             if p.suffix.lower() in _FINAL_EXTS and ".part" not in p.name
+            and not any(marker in p.name[len(stem):] for marker in _INTERMEDIATE_MARKERS)
         ]
         if not candidates:
             return None

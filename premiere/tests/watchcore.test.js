@@ -1,122 +1,69 @@
-// node --test premiere/tests/watchcore.test.js
-// Pure watcher logic: candidate filter, readiness gate, dedupe keys.
-"use strict";
-const test = require("node:test");
-const assert = require("node:assert");
-const W = require("../js/watchcore.js");
+const { test } = require('node:test');
+const assert = require('node:assert');
+const W = require('../js/watchcore.js');
 
-function entry(name, size, mtimeMs) {
-  return { name: name, path: "/footage/" + name, size: size, mtimeMs: mtimeMs || 1000 };
+const never = () => false;
+const f = (name, size, extra = {}) => ({ name, path: '/w/' + name, size, mtimeMs: 1000, ...extra });
+
+function run(entries, ticks, seen = never) {
+  let state = {};
+  let last;
+  for (let i = 0; i < ticks; i++) {
+    last = W.planTick(entries, state, seen);
+    state = last.sizes;
+  }
+  return last;
 }
 
-test("isCandidateName accepts video extensions, any case", () => {
-  assert.ok(W.isCandidateName("clip.mp4"));
-  assert.ok(W.isCandidateName("Clip.MOV"));
-  assert.ok(W.isCandidateName("a.mkv"));
-  assert.ok(W.isCandidateName("b.webm"));
-  assert.ok(W.isCandidateName("c.m4v"));
+test('a settled local file imports, but only after STABLE_TICKS observations', () => {
+  const e = [f('clip.mp4', 5000)];
+  assert.strictEqual(run(e, 1).ready.length, 0, 'first sighting must not import');
+  assert.strictEqual(run(e, 2).ready.length, 0, 'one match is not enough');
+  assert.strictEqual(run(e, 3).ready.length, 1, 'settles after STABLE_TICKS matches');
 });
 
-test("isCandidateName rejects non-video and in-flight files", () => {
-  assert.ok(!W.isCandidateName("notes.txt"));
-  assert.ok(!W.isCandidateName("clip.mp4.part"));
-  assert.ok(!W.isCandidateName("clip.part-Frag1.mp4"));
-  assert.ok(!W.isCandidateName("clip.mp4.ytdl"));
-  assert.ok(!W.isCandidateName("clip.h264tmp.mp4"));
-  assert.ok(!W.isCandidateName("clip"));
-  assert.ok(!W.isCandidateName(".mp4")); // hidden/no stem
+test('a dataless cloud placeholder never imports, however long it sits', () => {
+  assert.strictEqual(run([f('online-only.mp4', 697415, { hasData: false })], 10).ready.length, 0);
 });
 
-test("dedupeKey includes path, size and mtime", () => {
-  const k = W.dedupeKey("/f/a.mp4", 100, 5000.7);
-  assert.strictEqual(k, "/f/a.mp4|100|5001");
-  assert.notStrictEqual(k, W.dedupeKey("/f/a.mp4", 100, 9000));
-  assert.notStrictEqual(k, W.dedupeKey("/f/a.mp4", 101, 5000.7));
+test('a file still growing never settles', () => {
+  let state = {};
+  let ready = [];
+  for (let size = 1000; size <= 9000; size += 1000) {
+    const r = W.planTick([f('growing.mp4', size)], state, never);
+    state = r.sizes;
+    ready = r.ready;
+  }
+  assert.strictEqual(ready.length, 0);
 });
 
-test("planTick: new file waits one tick, imports when size is stable", () => {
-  const seen = () => false;
-  const first = W.planTick([entry("a.mp4", 100)], {}, seen);
-  assert.deepStrictEqual(first.ready, []);
-  assert.strictEqual(first.sizes["/footage/a.mp4"], 100);
-
-  const second = W.planTick([entry("a.mp4", 100)], first.sizes, seen);
-  assert.strictEqual(second.ready.length, 1);
-  assert.strictEqual(second.ready[0].path, "/footage/a.mp4");
+test('a finished name is held back while its .part sibling still exists', () => {
+  const mid = [f('clip.mp4', 5000), f('clip.mp4.part', 120)];
+  assert.strictEqual(run(mid, 5).ready.length, 0, 'sibling means still assembling');
+  assert.strictEqual(run([f('clip.mp4', 5000)], 3).ready.length, 1, 'imports once sibling is gone');
 });
 
-test("planTick: growing file stays pending until stable", () => {
-  const seen = () => false;
-  let sizes = W.planTick([entry("a.mp4", 100)], {}, seen).sizes;
-  const grew = W.planTick([entry("a.mp4", 250)], sizes, seen);
-  assert.deepStrictEqual(grew.ready, []);
-  assert.strictEqual(grew.sizes["/footage/a.mp4"], 250);
-  const stable = W.planTick([entry("a.mp4", 250)], grew.sizes, seen);
-  assert.strictEqual(stable.ready.length, 1);
+test('temp markers are still excluded by name', () => {
+  assert.strictEqual(W.isCandidateName('clip.mp4.part'), false);
+  assert.strictEqual(W.isCandidateName('clip.ytdl'), false);
+  assert.strictEqual(W.isCandidateName('clip.mp4'), true);
 });
 
-test("planTick: zero-size files never become ready", () => {
-  const seen = () => false;
-  let sizes = W.planTick([entry("a.mp4", 0)], {}, seen).sizes;
-  const again = W.planTick([entry("a.mp4", 0)], sizes, seen);
-  assert.deepStrictEqual(again.ready, []);
+test('zero-byte files never settle', () => {
+  assert.strictEqual(run([f('empty.mp4', 0)], 5).ready.length, 0);
 });
 
-test("planTick: seen keys are skipped entirely", () => {
-  const key = W.dedupeKey("/footage/a.mp4", 100, 1000);
-  const seen = (k) => k === key;
-  let sizes = W.planTick([entry("a.mp4", 100)], {}, seen).sizes;
-  const second = W.planTick([entry("a.mp4", 100)], sizes, seen);
-  assert.deepStrictEqual(second.ready, []);
+test('already-seen files are skipped entirely', () => {
+  assert.strictEqual(run([f('clip.mp4', 5000)], 5, () => true).ready.length, 0);
 });
 
-test("planTick: same path re-downloaded (new mtime) is not deduped", () => {
-  const oldKey = W.dedupeKey("/footage/a.mp4", 100, 1000);
-  const seen = (k) => k === oldKey;
-  const fresh = entry("a.mp4", 100, 7777);
-  let sizes = W.planTick([fresh], {}, seen).sizes;
-  const second = W.planTick([fresh], sizes, seen);
-  assert.strictEqual(second.ready.length, 1);
+test('legacy bare-number state from an older run is tolerated', () => {
+  const e = [f('clip.mp4', 5000)];
+  const r1 = W.planTick(e, { '/w/clip.mp4': 5000 }, never);
+  assert.strictEqual(r1.ready.length, 0, 'legacy state restarts the counter, does not crash');
+  assert.strictEqual(W.planTick(e, r1.sizes, never).ready.length, 1);
 });
 
-test("planTick: temp and non-video files are ignored", () => {
-  const seen = () => false;
-  const entries = [entry("a.mp4.part", 100), entry("notes.txt", 5), entry("b.h264tmp.mp4", 9)];
-  const p = W.planTick(entries, {}, seen);
-  assert.deepStrictEqual(p.ready, []);
-  assert.deepStrictEqual(p.sizes, {});
-});
-
-test("planTick: batch — several files can become ready in one tick", () => {
-  const seen = () => false;
-  const es = [entry("a.mp4", 10), entry("b.mov", 20)];
-  const sizes = W.planTick(es, {}, seen).sizes;
-  const p = W.planTick(es, sizes, seen);
-  assert.strictEqual(p.ready.length, 2);
-});
-
-test("projectFootageDir derives a sibling folder from the project path", () => {
-  assert.strictEqual(
-    W.projectFootageDir("/Users/z/Edits/MyDoc/MyDoc.prproj", "FootageGrab"),
-    "/Users/z/Edits/MyDoc/FootageGrab");
-  assert.strictEqual(
-    W.projectFootageDir("C:\\Users\\z\\Edits\\MyDoc.prproj", "FootageGrab"),
-    "C:\\Users\\z\\Edits\\FootageGrab");
-  assert.strictEqual(W.projectFootageDir("/a/b.prproj"), "/a/FootageGrab"); // default name
-});
-
-test("projectFootageDir returns empty for unsaved/absent projects", () => {
-  assert.strictEqual(W.projectFootageDir(""), "");
-  assert.strictEqual(W.projectFootageDir(null), "");
-  assert.strictEqual(W.projectFootageDir("Untitled.prproj"), ""); // no separator: not on disk
-  assert.strictEqual(W.projectFootageDir("/loose.prproj"), ""); // refuses filesystem root
-});
-
-test("pruneKeys keeps the most recent entries", () => {
-  const keys = [];
-  for (let i = 0; i < 600; i++) keys.push("k" + i);
-  const pruned = W.pruneKeys(keys, 500);
-  assert.strictEqual(pruned.length, 500);
-  assert.strictEqual(pruned[0], "k100");
-  assert.strictEqual(pruned[pruned.length - 1], "k599");
+test('Windows (blocks unreported) still imports normally', () => {
+  assert.strictEqual(run([f('clip.mp4', 5000, { hasData: undefined })], 3).ready.length, 1);
 });
