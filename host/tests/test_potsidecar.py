@@ -321,7 +321,9 @@ class RunnerWiringTests(unittest.TestCase):
             stub.write_text(STUB_YTDLP)
             stub.chmod(0o755)
             cfg = {
-                "output_dir": tmp, "quality": "max", "accurate_cut": False,
+                "destinations": [{"id": "d1", "label": "test", "path": tmp}],
+                "destination_id": "d1",
+                "quality": "max", "accurate_cut": False,
                 "compat_transcode": False, "cookies_browser": "none",
                 "template_segment": "{title} {n}", "template_full": "{title} {n}",
                 "ytdlp_path": str(stub), "ffmpeg_path": "/bin/ls",

@@ -28,40 +28,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["quality"], "max")
         self.assertTrue(cfg["compat_transcode"])
 
-    def test_project_output_dir_wins_while_claim_is_fresh(self):
-        import time
-        proj = Path(self.tmp.name) / "MyDoc" / "FootageGrab"
-        cfg = {"output_dir": str(Path(self.tmp.name) / "global"),
-               "project_output_dir": str(proj),
-               "project_output_dir_ts": time.time()}
-        out = config.ensure_output_dir(cfg)
-        self.assertEqual(out, proj)
-        self.assertTrue(proj.is_dir())
-
-    def test_stale_project_claim_falls_back_to_global(self):
-        import time
-        glob = Path(self.tmp.name) / "global"
-        cfg = {"output_dir": str(glob),
-               "project_output_dir": str(Path(self.tmp.name) / "Old" / "FootageGrab"),
-               "project_output_dir_ts": time.time() - 3600}  # panel long gone
-        self.assertEqual(config.ensure_output_dir(cfg), glob)
-
-    def test_missing_claim_timestamp_falls_back_to_global(self):
-        glob = Path(self.tmp.name) / "global"
-        cfg = {"output_dir": str(glob),
-               "project_output_dir": str(Path(self.tmp.name) / "Old" / "FootageGrab")}
-        self.assertEqual(config.ensure_output_dir(cfg), glob)
-
-    def test_empty_project_output_dir_falls_back(self):
-        glob = Path(self.tmp.name) / "global"
-        cfg = {"output_dir": str(glob), "project_output_dir": ""}
-        self.assertEqual(config.ensure_output_dir(cfg), glob)
-
-    def test_project_output_dir_survives_load_roundtrip(self):
-        config.save({"output_dir": "~/x", "project_output_dir": "/p/FootageGrab"})
-        cfg = config.load()
-        self.assertEqual(cfg["project_output_dir"], "/p/FootageGrab")
-
     def test_legacy_best_normalized_on_load(self):
         (Path(self.tmp.name) / "config.json").write_text(json.dumps({"quality": "best"}))
         self.assertEqual(config.load()["quality"], "max")
@@ -96,6 +62,73 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["pot_idle_shutdown"], 7200)
         cfg, errors = config.update({"pot_idle_shutdown": "soon"})
         self.assertTrue(errors)
+
+    def test_legacy_output_dir_migrates_to_a_selected_destination(self):
+        legacy = str(Path(self.tmp.name) / "old-folder")
+        config.save({"output_dir": legacy, "quality": "max"})
+        cfg = config.load()
+        dests = config.destinations(cfg)
+        self.assertEqual(len(dests), 1)
+        self.assertEqual(dests[0]["path"], legacy)
+        self.assertEqual(dests[0]["label"], "old-folder")
+        self.assertEqual(cfg["destination_id"], dests[0]["id"])
+        self.assertEqual(config.effective_output_dir(cfg), legacy)
+
+    def test_project_claim_fields_are_dropped_on_migration(self):
+        config.save({"output_dir": "~/a", "project_output_dir": "/tmp/claimed",
+                     "project_output_dir_ts": 9e9})
+        cfg = config.load()
+        self.assertNotIn("project_output_dir", cfg)
+        self.assertEqual(config.effective_output_dir(cfg), "~/a")
+
+    def test_add_destination_appends_labels_and_selects(self):
+        first = str(Path(self.tmp.name) / "one")
+        second = str(Path(self.tmp.name) / "two")
+        config.add_destination(first)
+        cfg, entry = config.add_destination(second, label="Chris Tucker")
+        self.assertEqual(entry["label"], "Chris Tucker")
+        self.assertEqual(cfg["destination_id"], entry["id"])
+        self.assertEqual([d["path"] for d in config.destinations(cfg)],
+                         [first, second])
+
+    def test_add_destination_defaults_label_to_folder_name(self):
+        cfg, entry = config.add_destination(str(Path(self.tmp.name) / "Videos"))
+        self.assertEqual(entry["label"], "Videos")
+
+    def test_ids_are_unique(self):
+        config.add_destination(str(Path(self.tmp.name) / "one"))
+        cfg, _ = config.add_destination(str(Path(self.tmp.name) / "two"))
+        ids = [d["id"] for d in config.destinations(cfg)]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_select_destination_switches_the_effective_dir(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        cfg, err = config.select_destination(a["id"])
+        self.assertEqual(err, "")
+        self.assertEqual(config.effective_output_dir(cfg), a["path"])
+
+    def test_select_unknown_destination_reports_an_error(self):
+        cfg, err = config.select_destination("nope")
+        self.assertNotEqual(err, "")
+
+    def test_removing_the_selected_destination_falls_back_to_the_first(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        cfg, err = config.remove_destination(b["id"])
+        self.assertEqual(err, "")
+        self.assertEqual(cfg["destination_id"], a["id"])
+
+    def test_removing_the_last_destination_leaves_no_selection(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, err = config.remove_destination(a["id"])
+        self.assertEqual(config.destinations(cfg), [])
+        self.assertIsNone(config.selected_destination(cfg))
+
+    def test_effective_output_dir_falls_back_to_the_default_when_empty(self):
+        cfg = config.load()
+        self.assertEqual(config.effective_output_dir(cfg),
+                         config.DEFAULT_DESTINATION)
 
 
 if __name__ == "__main__":
