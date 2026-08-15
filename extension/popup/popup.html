@@ -52,16 +52,18 @@
     </section>
 
     <section class="card">
-      <div class="card-title">Footage folder</div>
+      <div class="card-title">Save to</div>
       <div class="folder-row">
-        <code id="folder-path" class="folder-path">—</code>
+        <select id="destination-select" class="folder-path"></select>
       </div>
       <div class="row-actions">
-        <button id="choose-folder" class="btn">Choose folder…</button>
+        <button id="add-destination" class="btn">Add folder…</button>
         <button id="open-folder" class="btn btn-ghost">Open in Finder</button>
+        <button id="remove-destination" class="btn btn-ghost">Remove</button>
       </div>
-      <p class="hint">Point this at your Premiere project's footage folder. The picker
-      opens behind this popup — reopen the popup to confirm the change.</p>
+      <p class="hint">Downloads go straight here — they are assembled out of sight
+      and appear only once complete, so a half-finished clip never reaches Dropbox
+      or Premiere. The picker opens behind this popup; reopen it to confirm.</p>
     </section>
 
     <section class="card">
