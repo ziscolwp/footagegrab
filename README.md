@@ -53,8 +53,9 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 4. **Fully restart the browser** (⌘Q — a normal window close is not enough for
    Chrome to pick up native host registrations).
 
-5. Click the FootageGrab toolbar icon → **Settings** → **Choose folder…** and
-   point it at your Premiere project's footage folder.
+5. Click the FootageGrab toolbar icon → **Settings** → **Add folder** and
+   point it at your Premiere project's footage folder. You can save several
+   folders and switch between them.
 
 6. **Premiere panel** (optional but recommended):
 
@@ -72,6 +73,10 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 > update, hit **Reload** on `chrome://extensions`.
 
 ## Install (Windows)
+
+> **Full runbook:** [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) — step-by-step
+> with verification after each step, written so you can hand it to any AI
+> agent ("follow INSTALL-WINDOWS.md") or walk through it manually.
 
 1. **Python 3** — [python.org/downloads](https://www.python.org/downloads/),
    and tick **"Add python.exe to PATH"** in the installer.
@@ -97,7 +102,7 @@ On any other site: right-click → **Grab video with FootageGrab** (or `⌥G`).
 6. **Premiere panel**: double-click `install\install-premiere.bat`, restart
    Premiere, open **Window → Extensions → FootageGrab Bridge**.
 
-7. Click the FootageGrab toolbar icon → **Settings** → **Choose folder…**.
+7. Click the FootageGrab toolbar icon → **Settings** → **Add folder**.
 
 Windows notes: the Premiere-safe H.264 conversion uses NVENC on NVIDIA GPUs
 and falls back to CPU x264 (slower than the Mac hardware path, same quality).
