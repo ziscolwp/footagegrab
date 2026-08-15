@@ -79,11 +79,13 @@ install/install-premiere.sh      # copies to ~/Library/Application Support/Adobe
 
 ### Watcher design (the robust part — this is why MCP lost)
 
-- **Source of truth for the folder**: read `output_dir` directly from
+- **Source of truth for the folder**: read the selected destination from
+  `destinations` / `destination_id` in
   `~/Library/Application Support/FootageGrab/config.json` via CEP Node
-  (`window.cep_node.require('fs')`). Re-read it every poll tick so changing
-  the folder in the extension popup retargets the panel automatically. Allow
-  a manual override field in the panel for edge cases.
+  (`window.cep_node.require('fs')`) — `output_dir` no longer exists. Re-read
+  it every poll tick so changing the destination in the extension popup
+  retargets the panel automatically. Allow a manual override field in the
+  panel for edge cases.
 - **Poll `readdir` every 2s as the primary mechanism, `fs.watch` only as an
   accelerant.** Critical real-world constraint: the user's projects live on
   an external volume (`/Volumes/Editing_Project/...` — seen live), and the
