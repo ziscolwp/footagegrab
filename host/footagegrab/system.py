@@ -12,6 +12,34 @@ def _run(argv, timeout):
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
 
 
+def mark_cloud_ignored(path):
+    """Tell Dropbox to skip this folder. Best effort — returns True if marked.
+
+    macOS uses an extended attribute; Windows the same-named alternate data
+    stream. Failure is not fatal: delivery is still atomic, the temp folder
+    just syncs.
+
+    macOS note: CPython's os.setxattr is Linux-only (not exposed on Darwin),
+    so the attribute is written via the `xattr` CLI that ships with macOS
+    instead.
+    """
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        if sys.platform == "darwin":
+            proc = _run(["xattr", "-w", "com.dropbox.ignored", "1", str(path)],
+                        timeout=10)
+            return proc.returncode == 0
+        if sys.platform == "win32":
+            with open(f"{path}:com.dropbox.ignored", "w", encoding="ascii") as f:
+                f.write("1")
+            return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
 def reveal(path):
     """Reveal a file in Finder / Explorer. Returns (ok, error)."""
     p = Path(str(path)).expanduser()

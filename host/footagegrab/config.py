@@ -250,6 +250,22 @@ def ensure_output_dir(cfg):
     return path
 
 
+STAGE_DIR_NAME = ".fg-tmp"
+
+
+def ensure_stage_dir(out_dir):
+    """Staging folder inside the destination, hidden from Dropbox.
+
+    It must live on the destination's volume — delivery is an os.replace, and
+    that is only atomic within one filesystem.
+    """
+    from . import system  # local import: system imports config at module level
+    stage = Path(out_dir) / STAGE_DIR_NAME
+    stage.mkdir(parents=True, exist_ok=True)
+    system.mark_cloud_ignored(stage)
+    return stage
+
+
 def augment_path():
     """Prepend Homebrew/MacPorts locations Chrome strips from PATH."""
     current = os.environ.get("PATH", "")

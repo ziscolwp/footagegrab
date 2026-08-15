@@ -130,6 +130,27 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.effective_output_dir(cfg),
                          config.DEFAULT_DESTINATION)
 
+    def test_ensure_stage_dir_creates_a_marked_folder_inside_the_destination(self):
+        dest = Path(self.tmp.name) / "Videos"
+        dest.mkdir()
+        stage = config.ensure_stage_dir(dest)
+        self.assertEqual(stage, dest / ".fg-tmp")
+        self.assertTrue(stage.is_dir())
+
+    def test_ensure_stage_dir_is_idempotent(self):
+        dest = Path(self.tmp.name) / "Videos"
+        dest.mkdir()
+        first = config.ensure_stage_dir(dest)
+        second = config.ensure_stage_dir(dest)
+        self.assertEqual(first, second)
+
+    def test_stage_dir_shares_a_volume_with_the_destination(self):
+        # Atomic delivery depends on this: os.replace across volumes fails.
+        dest = Path(self.tmp.name) / "Videos"
+        dest.mkdir()
+        stage = config.ensure_stage_dir(dest)
+        self.assertEqual(os.stat(stage).st_dev, os.stat(dest).st_dev)
+
 
 if __name__ == "__main__":
     unittest.main()
