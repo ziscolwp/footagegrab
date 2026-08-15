@@ -179,9 +179,9 @@ class Router:
 
     def _open_folder(self, msg):
         cfg = config.load()
-        # effective folder, not raw output_dir — the extension's selected
-        # destination is the source of truth, so "Open folder" must resolve
-        # it the same way the download path does, not open something stale
+        # effective folder, resolved from the selected destination — that is
+        # the source of truth, so "Open folder" must resolve it the same way
+        # the download path does, not open something stale
         path = msg.get("path") or os.path.expanduser(config.effective_output_dir(cfg))
         ok, error = system.open_folder(path)
         if not ok:

@@ -122,12 +122,16 @@ def health(cfg):
     """Everything the popup needs to say whether grabbing will work."""
     ytdlp = config.resolve_tool("yt-dlp", cfg.get("ytdlp_path"))
     ffmpeg = config.resolve_tool("ffmpeg", cfg.get("ffmpeg_path"))
-    out = {"path": "", "exists": False, "writable": False}
+    path = Path(config.effective_output_dir(cfg)).expanduser()
     try:
-        d = config.ensure_output_dir(cfg)
-        out = {"path": str(d), "exists": True, "writable": True}
-    except OSError as exc:
-        out["path"] = str(exc)
+        config.validate_output_dir(cfg)
+        exists, writable = True, True
+    except OSError:
+        # Missing and unwritable both raise here; a folder that exists but
+        # isn't writable still reports exists so the popup doesn't tell the
+        # user to go create something that's already there.
+        exists, writable = path.is_dir(), False
+    out = {"path": str(path), "exists": exists, "writable": writable}
     return {
         "ytdlp": {"path": ytdlp or "", "version": tool_version(ytdlp) if ytdlp else "",
                   "found": bool(ytdlp)},

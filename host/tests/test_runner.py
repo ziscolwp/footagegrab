@@ -1,3 +1,4 @@
+# TODO: split by concern
 """Retry-ladder behavior of DownloadRunner around the rung-2 fallback.
 
 A scripted yt-dlp stub fails every attempt with a transient 403; the fallback
