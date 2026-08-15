@@ -51,6 +51,7 @@ class DownloadRunner:
         # Permanent errors (login walls, removed videos) exit on the first rung.
         attempt = 0
         client = None
+        first_error = ""
         ok, error, final = False, "", ""
         while True:
             attempt += 1
@@ -68,7 +69,16 @@ class DownloadRunner:
                 break
             if job.cancel_requested or error == "canceled":
                 return False, "canceled", ""
-            if not sections.is_transient_error(error):
+            first_error = first_error or error
+            # A rotated player client can come back with no playable formats at
+            # all (YouTube's SABR gating). That is a property of the client we
+            # picked, not of the video — drop the override, keep climbing, and
+            # report the original failure rather than the misleading one.
+            if client and sections.is_format_unavailable_error(error):
+                log.info("job %s: client %s served no formats — dropping override",
+                         job.id, client)
+                error = first_error
+            elif not sections.is_transient_error(error):
                 return False, error, ""
             plan = sections.plan_retry(attempt, job.mode)
             if plan is None:

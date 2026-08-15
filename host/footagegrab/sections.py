@@ -31,6 +31,22 @@ _TRANSIENT_MARKERS = (
     "timed out",
 )
 
+# YouTube's SABR rollout means the browser-shaped clients (web, web_safari, tv,
+# ios) now hand back storyboard images only unless a GVS PO token is supplied.
+# Rotating onto one of those turns a recoverable 403 into a hard "Requested
+# format is not available", so only clients that still serve real streams are
+# eligible for the retry ladder. Keep this list honest — verify with:
+#   yt-dlp --extractor-args "youtube:player_client=<name>" -F <url>
+FORMAT_SERVING_CLIENTS = ("mweb", "android_vr")
+
+# yt-dlp's way of saying "this client returned no playable streams". Distinct
+# from a transient failure: retrying the same client changes nothing, but
+# dropping the client override usually fixes it outright.
+_NO_FORMAT_MARKERS = (
+    "requested format is not available",
+    "only images are available",
+)
+
 # The full-download-then-cut fallback is only worth it when the whole video is
 # reasonably small; past this many seconds a plain retry is used instead.
 FALLBACK_MAX_DURATION = 1800
@@ -45,6 +61,15 @@ def is_transient_error(text):
     return any(marker in lowered for marker in _TRANSIENT_MARKERS)
 
 
+def is_format_unavailable_error(text):
+    """True when yt-dlp found no playable formats — typically because the
+    player client in use is SABR-gated for this video."""
+    lowered = str(text or "").lower()
+    if not lowered:
+        return False
+    return any(marker in lowered for marker in _NO_FORMAT_MARKERS)
+
+
 def plan_retry(failed_attempt, mode):
     """Ladder for transient failures. Returns the next attempt's strategy or
     None to give up. failed_attempt is 1-based (1 = the fast path just failed).
@@ -55,7 +80,7 @@ def plan_retry(failed_attempt, mode):
     full downloads already use yt-dlp's resilient native downloader, so they
     just get one more plain retry)."""
     if failed_attempt == 1:
-        return {"delay": 3, "client": "web_safari", "try_fallback": False}
+        return {"delay": 3, "client": FORMAT_SERVING_CLIENTS[0], "try_fallback": False}
     if failed_attempt == 2:
         return {"delay": 5, "client": None, "try_fallback": mode == "segment"}
     return None

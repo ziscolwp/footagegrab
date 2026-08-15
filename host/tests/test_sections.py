@@ -6,8 +6,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from footagegrab.sections import (
     FALLBACK_MAX_DURATION,
+    FORMAT_SERVING_CLIENTS,
     build_download_args,
     build_local_cut_args,
+    is_format_unavailable_error,
     is_transient_error,
     plan_retry,
     section_spec,
@@ -96,13 +98,43 @@ class TransientErrorTests(unittest.TestCase):
         self.assertFalse(is_transient_error(None))
 
 
+class FormatUnavailableTests(unittest.TestCase):
+    def test_recognises_yt_dlp_format_error(self):
+        self.assertTrue(is_format_unavailable_error(
+            "ERROR: [youtube] abc: Requested format is not available. "
+            "Use --list-formats for a list of available formats"))
+        self.assertTrue(is_format_unavailable_error(
+            "WARNING: Only images are available for download."))
+        self.assertTrue(is_format_unavailable_error(
+            "This video is drm protected and only images are available"))
+
+    def test_other_errors_do_not_match(self):
+        self.assertFalse(is_format_unavailable_error("ffmpeg exited with code 8"))
+        self.assertFalse(is_format_unavailable_error("Video unavailable"))
+        self.assertFalse(is_format_unavailable_error(""))
+        self.assertFalse(is_format_unavailable_error(None))
+
+    def test_format_error_is_not_treated_as_transient(self):
+        # it must not climb the ladder on its own — the runner only forgives it
+        # when a client override caused it
+        self.assertFalse(is_transient_error("Requested format is not available"))
+
+
 class PlanRetryTests(unittest.TestCase):
     def test_first_failure_retries_with_rotated_client(self):
         plan = plan_retry(1, "segment")
         self.assertIsNotNone(plan)
         self.assertGreater(plan["delay"], 0)
-        self.assertEqual(plan["client"], "web_safari")
+        self.assertEqual(plan["client"], "mweb")
         self.assertFalse(plan["try_fallback"])
+
+    def test_rotation_clients_still_serve_formats(self):
+        # web/web_safari/tv/ios are SABR-gated and return storyboards only;
+        # rotating onto them turns a recoverable 403 into a hard format error
+        for attempt in (1, 2, 3, 4):
+            plan = plan_retry(attempt, "segment")
+            if plan and plan["client"]:
+                self.assertIn(plan["client"], FORMAT_SERVING_CLIENTS)
 
     def test_second_failure_offers_fallback_for_segments_only(self):
         seg = plan_retry(2, "segment")
