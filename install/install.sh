@@ -48,7 +48,41 @@ for tool in yt-dlp ffmpeg; do
   fi
 done
 
-# 3. launcher script (absolute paths baked in; re-run install.sh if repo moves)
+# 3. PO token sidecar + yt-dlp plugin (best-effort: without it grabs still
+#    work, YouTube just degrades some player clients to lower quality).
+#    Pinned release — bump POT_VERSION and re-run this script to update.
+POT_VERSION="v0.8.1"
+POT_BIN="$APP_HOME/bin/bgutil-pot"
+POT_BASE="https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/download/$POT_VERSION"
+PLUGIN_DIR="$HOME/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider"
+case "$(uname -m)" in
+  arm64|aarch64) POT_ASSET="bgutil-pot-macos-aarch64" ;;
+  *)             POT_ASSET="bgutil-pot-macos-x86_64" ;;
+esac
+mkdir -p "$APP_HOME/bin"
+if [[ -x "$POT_BIN" && -d "$PLUGIN_DIR" \
+      && "$(cat "$POT_BIN.version" 2>/dev/null)" == "$POT_VERSION" ]]; then
+  ok "PO token sidecar: $POT_VERSION (already installed)"
+elif curl -fsSL --retry 2 -o "$POT_BIN.tmp" "$POT_BASE/$POT_ASSET" \
+     && curl -fsSL --retry 2 -o "$POT_BIN.plugin.zip" "$POT_BASE/bgutil-ytdlp-pot-provider-rs.zip"; then
+  mv "$POT_BIN.tmp" "$POT_BIN"
+  chmod +x "$POT_BIN"
+  rm -rf "$PLUGIN_DIR"
+  mkdir -p "$PLUGIN_DIR"
+  if unzip -oq "$POT_BIN.plugin.zip" -d "$PLUGIN_DIR"; then
+    printf '%s' "$POT_VERSION" > "$POT_BIN.version"
+    ok "PO token sidecar: $POT_VERSION -> $POT_BIN"
+    ok "yt-dlp POT plugin: $PLUGIN_DIR"
+  else
+    warn "could not extract the POT plugin — grabs degrade to tokenless"
+  fi
+  rm -f "$POT_BIN.plugin.zip"
+else
+  rm -f "$POT_BIN.tmp" "$POT_BIN.plugin.zip"
+  warn "could not download the PO token sidecar — grabs degrade to tokenless"
+fi
+
+# 4. launcher script (absolute paths baked in; re-run install.sh if repo moves)
 mkdir -p "$APP_HOME/bin" "$APP_HOME/logs"
 cat > "$LAUNCHER" <<EOF
 #!/bin/bash
@@ -57,7 +91,7 @@ EOF
 chmod +x "$LAUNCHER"
 ok "launcher: $LAUNCHER"
 
-# 4. native messaging manifests for every installed browser
+# 5. native messaging manifests for every installed browser
 MANIFEST_JSON="$(sed -e "s|__LAUNCHER__|$LAUNCHER|" -e "s|__EXT_ID__|$EXT_ID|" \
   "$SCRIPT_DIR/com.footagegrab.host.json.tpl")"
 
@@ -81,7 +115,7 @@ if [[ "$installed_any" == 0 ]]; then
   warn "no Chromium-based browser profile folders found — open Chrome once, then re-run"
 fi
 
-# 5. self-test: spawn the host through the launcher, speak native messaging
+# 6. self-test: spawn the host through the launcher, speak native messaging
 echo
 bold "Self-test"
 if "$PYTHON3" "$REPO_DIR/host/selftest.py" --roundtrip "$LAUNCHER"; then

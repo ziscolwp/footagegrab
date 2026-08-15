@@ -80,6 +80,23 @@ class ConfigTests(unittest.TestCase):
         cfg, _ = config.update({"compat_transcode": "yes"})
         self.assertIs(cfg["compat_transcode"], True)
 
+    def test_pot_sidecar_defaults(self):
+        cfg = config.load()
+        self.assertEqual(cfg["pot_provider_path"], "")
+        self.assertEqual(cfg["pot_idle_shutdown"], 900)
+
+    def test_pot_provider_path_accepts_and_strips_string(self):
+        cfg, errors = config.update({"pot_provider_path": "  /opt/bgutil-pot  "})
+        self.assertEqual((cfg["pot_provider_path"], errors), ("/opt/bgutil-pot", []))
+
+    def test_pot_idle_shutdown_clamped_to_sane_seconds(self):
+        cfg, errors = config.update({"pot_idle_shutdown": 5})
+        self.assertEqual((cfg["pot_idle_shutdown"], errors), (60, []))
+        cfg, _ = config.update({"pot_idle_shutdown": 999999})
+        self.assertEqual(cfg["pot_idle_shutdown"], 7200)
+        cfg, errors = config.update({"pot_idle_shutdown": "soon"})
+        self.assertTrue(errors)
+
 
 if __name__ == "__main__":
     unittest.main()

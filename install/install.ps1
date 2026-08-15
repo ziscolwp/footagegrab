@@ -51,12 +51,44 @@ foreach ($tool in @("yt-dlp", "ffmpeg")) {
     }
 }
 
-# 3. launcher (absolute paths baked in; re-run install.bat if the folder moves)
+# 3. PO token sidecar + yt-dlp plugin (best-effort: without it grabs still
+#    work, YouTube just degrades some player clients to lower quality).
+#    Pinned release — bump $PotVersion and re-run this script to update.
+$PotVersion = "v0.8.1"
+$PotBin     = Join-Path $AppHome "bin\bgutil-pot.exe"
+$PotStamp   = "$PotBin.version"
+$PotBase    = "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/download/$PotVersion"
+$PluginDir  = Join-Path $env:APPDATA "yt-dlp\plugins\bgutil-ytdlp-pot-provider"
+New-Item -ItemType Directory -Force -Path (Join-Path $AppHome "bin") | Out-Null
+$PotUpToDate = (Test-Path $PotBin) -and (Test-Path $PluginDir) -and
+    ((Get-Content $PotStamp -ErrorAction SilentlyContinue) -eq $PotVersion)
+if ($PotUpToDate) {
+    Write-Host "  + PO token sidecar: $PotVersion (already installed)"
+} else {
+    try {
+        Invoke-WebRequest -UseBasicParsing -OutFile $PotBin `
+            -Uri "$PotBase/bgutil-pot-windows-x86_64.exe"
+        $PluginZip = Join-Path $env:TEMP "bgutil-pot-plugin.zip"
+        Invoke-WebRequest -UseBasicParsing -OutFile $PluginZip `
+            -Uri "$PotBase/bgutil-ytdlp-pot-provider-rs.zip"
+        if (Test-Path $PluginDir) { Remove-Item -Recurse -Force $PluginDir }
+        Expand-Archive -Path $PluginZip -DestinationPath $PluginDir -Force
+        Remove-Item $PluginZip -ErrorAction SilentlyContinue
+        [System.IO.File]::WriteAllText($PotStamp, $PotVersion, $Utf8NoBom)
+        Write-Host "  + PO token sidecar: $PotVersion -> $PotBin"
+        Write-Host "  + yt-dlp POT plugin: $PluginDir"
+    } catch {
+        Write-Host "  ! PO token sidecar install failed ($($_.Exception.Message))" -ForegroundColor Yellow
+        Write-Host "    Grabs still work - they just run tokenless at lower quality." -ForegroundColor Yellow
+    }
+}
+
+# 4. launcher (absolute paths baked in; re-run install.bat if the folder moves)
 New-Item -ItemType Directory -Force -Path (Join-Path $AppHome "bin"), (Join-Path $AppHome "logs") | Out-Null
 [System.IO.File]::WriteAllText($Launcher, "@echo off`r`n$PythonCmd `"$HostEntry`"`r`n", $Utf8NoBom)
 Write-Host "  + launcher: $Launcher"
 
-# 4. native messaging manifest + registry for every Chromium-based browser
+# 5. native messaging manifest + registry for every Chromium-based browser
 $ManifestPath = Join-Path $AppHome "com.footagegrab.host.json"
 $Manifest = [ordered]@{
     name            = "com.footagegrab.host"
@@ -80,7 +112,7 @@ foreach ($root in @(
     Write-Host "  + registered: $key"
 }
 
-# 5. self-test: spawn the host through the launcher, speak native messaging
+# 6. self-test: spawn the host through the launcher, speak native messaging
 Write-Host ""
 Write-Host "Self-test" -ForegroundColor White
 & $PythonExe ($PythonArgs + @((Join-Path $RepoDir "host\selftest.py"), "--roundtrip", $Launcher))

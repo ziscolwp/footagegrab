@@ -131,10 +131,27 @@ class PlanRetryTests(unittest.TestCase):
     def test_rotation_clients_still_serve_formats(self):
         # web/web_safari/tv/ios are SABR-gated and return storyboards only;
         # rotating onto them turns a recoverable 403 into a hard format error
-        for attempt in (1, 2, 3, 4):
+        for attempt in (1, 2, 3, 4, 5):
             plan = plan_retry(attempt, "segment")
             if plan and plan["client"]:
                 self.assertIn(plan["client"], FORMAT_SERVING_CLIENTS)
+
+    def test_client_chain_is_the_measured_order(self):
+        # spec 2026-08-15: mweb (best with POT) -> android_vr (tokenless
+        # workhorse) -> tv_downgraded (last resort)
+        self.assertEqual(FORMAT_SERVING_CLIENTS,
+                         ("mweb", "android_vr", "tv_downgraded"))
+
+    def test_later_failures_walk_the_client_chain(self):
+        third = plan_retry(3, "segment")
+        self.assertEqual(third["client"], "android_vr")
+        self.assertFalse(third["try_fallback"])
+        fourth = plan_retry(4, "segment")
+        self.assertEqual(fourth["client"], "tv_downgraded")
+        self.assertFalse(fourth["try_fallback"])
+        # full mode climbs the same client rungs
+        self.assertEqual(plan_retry(3, "full")["client"], "android_vr")
+        self.assertEqual(plan_retry(4, "full")["client"], "tv_downgraded")
 
     def test_second_failure_offers_fallback_for_segments_only(self):
         seg = plan_retry(2, "segment")
@@ -143,9 +160,9 @@ class PlanRetryTests(unittest.TestCase):
         full = plan_retry(2, "full")
         self.assertFalse(full["try_fallback"])
 
-    def test_third_failure_gives_up(self):
-        self.assertIsNone(plan_retry(3, "segment"))
-        self.assertIsNone(plan_retry(4, "full"))
+    def test_fifth_failure_gives_up(self):
+        self.assertIsNone(plan_retry(5, "segment"))
+        self.assertIsNone(plan_retry(5, "full"))
 
     def test_fallback_cap_is_thirty_minutes(self):
         self.assertEqual(FALLBACK_MAX_DURATION, 1800)

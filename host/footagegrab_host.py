@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from footagegrab import __version__, config  # noqa: E402
+from footagegrab import __version__, config, potsidecar  # noqa: E402
 from footagegrab.jobs import TERMINAL, JobQueue  # noqa: E402
 from footagegrab.nm import NativeMessagingIO  # noqa: E402
 from footagegrab.router import Router  # noqa: E402
@@ -46,7 +46,11 @@ def main():
     log.info("host starting, version %s", __version__)
 
     io = NativeMessagingIO()
-    runner = DownloadRunner(config.load)
+    pot = potsidecar.PotSupervisor(
+        idle_shutdown=config.load().get(
+            "pot_idle_shutdown", potsidecar.DEFAULT_IDLE_SHUTDOWN),
+    )
+    runner = DownloadRunner(config.load, pot=pot)
     recorded = set()  # job ids already appended to history
     last_push = {}  # job id -> monotonic time of last progress push
 
@@ -102,6 +106,7 @@ def main():
         log.info("stdin closed with %d active job(s); draining", active)
         queue.drain(DRAIN_TIMEOUT)
     queue.stop()
+    pot.stop()  # an orphaned sidecar has no idle timer left to reap it
     log.info("host exiting")
 
 

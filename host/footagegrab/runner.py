@@ -20,8 +20,9 @@ _FINAL_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4a"}
 class DownloadRunner:
     """Owns the yt-dlp subprocesses so running jobs can be canceled."""
 
-    def __init__(self, get_config=config.load):
+    def __init__(self, get_config=config.load, pot=None):
         self._get_config = get_config
+        self._pot = pot  # PO-token sidecar supervisor; None disables it
         self._procs = {}
         self._lock = threading.Lock()
 
@@ -55,6 +56,16 @@ class DownloadRunner:
         ok, error, final = False, "", ""
         while True:
             attempt += 1
+            # Best-effort per attempt (retries re-extract, so a sidecar that
+            # died mid-session gets restarted here). A live sidecar upgrades
+            # mweb from progressive 360p to full adaptive streams; when it is
+            # unavailable the grab proceeds tokenless — never fails.
+            if self._pot is not None:
+                try:
+                    self._pot.ensure_running()
+                except Exception:
+                    log.warning("PO token supervisor failed — grabbing "
+                                "tokenless", exc_info=True)
             try:
                 argv = sections.build_download_args(
                     url=job.url, out_path=path, quality=quality,
@@ -104,9 +115,17 @@ class DownloadRunner:
                     )
                     if ok:
                         break
-                    return False, ("canceled" if job.cancel_requested else error), ""
+                    if job.cancel_requested or error == "canceled":
+                        return False, "canceled", ""
+                    if not sections.is_transient_error(error):
+                        return False, error, ""
+                    # a transiently-failed fallback is not the end: the rest
+                    # of the client chain (android_vr, tv_downgraded) takes a
+                    # different URL-issuing path and is still worth climbing
+                    log.info("job %s: fallback failed transiently — "
+                             "continuing the client ladder", job.id)
                 # video too long (or length unknown) for the fallback — the
-                # loop continues into one plain final attempt instead
+                # loop continues into the remaining client rungs instead
             client = plan["client"]
 
         if cfg.get("compat_transcode", True):

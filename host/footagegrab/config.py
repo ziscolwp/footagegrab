@@ -31,6 +31,9 @@ DEFAULTS = {
     "max_concurrent": 2,
     "ytdlp_path": "",
     "ffmpeg_path": "",
+    # PO-token sidecar (see potsidecar.py): binary override + idle shutdown
+    "pot_provider_path": "",
+    "pot_idle_shutdown": 900,  # seconds
 }
 
 VALID_QUALITY = ("max", "1080", "720", "best")
@@ -130,8 +133,15 @@ def update(patch):
             except (TypeError, ValueError):
                 errors.append("max_concurrent must be a number")
                 continue
+        if key == "pot_idle_shutdown":
+            try:
+                value = max(60, min(7200, int(value)))
+            except (TypeError, ValueError):
+                errors.append("pot_idle_shutdown must be a number of seconds")
+                continue
         if key in ("output_dir", "project_output_dir", "template_segment",
-                   "template_full", "ytdlp_path", "ffmpeg_path"):
+                   "template_full", "ytdlp_path", "ffmpeg_path",
+                   "pot_provider_path"):
             value = str(value).strip()
             if key.startswith("template") and not value:
                 errors.append(f"{key} cannot be empty")

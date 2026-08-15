@@ -35,9 +35,11 @@ _TRANSIENT_MARKERS = (
 # ios) now hand back storyboard images only unless a GVS PO token is supplied.
 # Rotating onto one of those turns a recoverable 403 into a hard "Requested
 # format is not available", so only clients that still serve real streams are
-# eligible for the retry ladder. Keep this list honest — verify with:
+# eligible for the retry ladder — in this order: mweb first (full adaptive
+# streams when the POT sidecar is up, 360p progressive without), android_vr
+# (works tokenless), tv_downgraded last. Keep this list honest — verify with:
 #   yt-dlp --extractor-args "youtube:player_client=<name>" -F <url>
-FORMAT_SERVING_CLIENTS = ("mweb", "android_vr")
+FORMAT_SERVING_CLIENTS = ("mweb", "android_vr", "tv_downgraded")
 
 # yt-dlp's way of saying "this client returned no playable streams". Distinct
 # from a transient failure: retrying the same client changes nothing, but
@@ -78,11 +80,16 @@ def plan_retry(failed_attempt, mode):
     URL-issuing path instead of re-rolling the same dice. Rung 3 asks the
     runner to consider the full-download-and-cut fallback (segments only —
     full downloads already use yt-dlp's resilient native downloader, so they
-    just get one more plain retry)."""
+    just get a plain retry). Rungs 4-5 walk the rest of the client chain
+    before giving up."""
     if failed_attempt == 1:
         return {"delay": 3, "client": FORMAT_SERVING_CLIENTS[0], "try_fallback": False}
     if failed_attempt == 2:
         return {"delay": 5, "client": None, "try_fallback": mode == "segment"}
+    if failed_attempt == 3:
+        return {"delay": 8, "client": FORMAT_SERVING_CLIENTS[1], "try_fallback": False}
+    if failed_attempt == 4:
+        return {"delay": 12, "client": FORMAT_SERVING_CLIENTS[2], "try_fallback": False}
     return None
 
 

@@ -1,7 +1,8 @@
 # PO Token Sidecar — Design
 
 **Date:** 2026-08-15
-**Status:** Approved for planning. Not implemented.
+**Status:** Implemented 2026-08-15 (host/footagegrab/potsidecar.py). Open
+questions settled — see the bottom of this document.
 
 ## Problem
 
@@ -119,8 +120,21 @@ it on the assumption that tokens fix 403s would be unsupported by evidence.
 - Manual verification: confirm `mweb` returns adaptive formats with the
   sidecar up, and progressive-only with it down.
 
-## Open questions
+## Open questions — settled 2026-08-15
 
-- Idle-shutdown period — needs a real number.
-- Whether to pin a specific provider release or track latest.
-- Where the binary lives on disk and how it gets updated.
+- **Idle-shutdown period: 900 s (15 min).** Long enough to cover inter-grab
+  gaps in an editing session, short enough that the sidecar is gone once the
+  user walks away. Overridable via the `pot_idle_shutdown` config key
+  (clamped 60–7200). Only processes the supervisor itself spawned are shut
+  down — an externally-run provider on the port is left alone.
+- **Pin a specific release: v0.8.1.** Matches the repo's curl_cffi pinning
+  precedent; a silently-updating binary can break as easily as a lagging one.
+  Updating = bump `POT_VERSION`/`$PotVersion` in `install/` and re-run the
+  installer (already the documented update flow for the host itself).
+- **Binary lives at `app_home()/bin/bgutil-pot(.exe)`** — next to the
+  existing host launcher (macOS `~/Library/Application Support/FootageGrab/
+  bin/`, Windows `%APPDATA%\FootageGrab\bin\`). The installer downloads the
+  pinned release asset and writes a `.version` stamp so re-runs are
+  idempotent; `pot_provider_path` in config overrides the location, mirroring
+  `ytdlp_path`/`ffmpeg_path`. Uninstallers stop the process and remove the
+  binary and the yt-dlp plugin dir.

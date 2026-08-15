@@ -16,6 +16,11 @@ done
 
 rm -f "$APP_HOME/bin/footagegrab-host"
 
+# PO token sidecar: stop it if running, then remove binary + yt-dlp plugin
+pkill -f "$APP_HOME/bin/bgutil-pot" 2>/dev/null || true
+rm -f "$APP_HOME/bin/bgutil-pot" "$APP_HOME/bin/bgutil-pot.version"
+rm -rf "$HOME/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider"
+
 if [[ "${1:-}" == "--purge" ]]; then
   rm -rf "$APP_HOME"
   echo "purged: $APP_HOME"
