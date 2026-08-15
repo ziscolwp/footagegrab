@@ -6,6 +6,8 @@ and duration probe are patched so no real downloads or network happen.
 
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -101,15 +103,21 @@ class DeliverAndSweepTests(unittest.TestCase):
             self.assertEqual(final.name, "clip_2.mp4")
             self.assertEqual((dest / "clip.mp4").read_bytes(), b"original")
 
-    def test_the_destination_holds_no_partial_names_while_staging(self):
-        # The whole point: a download in progress is invisible to Dropbox and
-        # to the Premiere watcher, because it lives under .fg-tmp.
+    def test_find_output_ignores_full_and_h264_intermediates(self):
+        # The staging folder is now shared between the fallback's whole-video
+        # temp (<stem>.full.mp4) and the compat-transcode scratch file
+        # (<stem>.h264tmp.mp4) — both satisfy _FINAL_EXTS and both match the
+        # {stem}.* glob, so picking the *largest* match (as _find_output did)
+        # can ship the wrong file. Without the fix, the 100-byte .full.mp4
+        # intermediate wins over the real 10-byte .mkv output.
         with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp)
-            stage = config.ensure_stage_dir(dest)
-            (stage / "clip.mp4.part").write_bytes(b"half")
-            visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
-            self.assertEqual(visible, [])
+            stage = Path(tmp)
+            target = stage / "clip.mp4"
+            (stage / "clip.full.mp4").write_bytes(b"x" * 100)
+            (stage / "clip.h264tmp.mp4").write_bytes(b"x" * 50)
+            (stage / "clip.mkv").write_bytes(b"y" * 10)
+            found = runner.DownloadRunner._find_output(target)
+            self.assertEqual(found, stage / "clip.mkv")
 
     def test_sweep_removes_leftover_staging_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,6 +130,202 @@ class DeliverAndSweepTests(unittest.TestCase):
     def test_sweep_is_safe_when_there_is_nothing_to_sweep(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner.sweep_stage_dir(Path(tmp))  # must not raise
+
+
+STUB_NOOP = """#!/bin/bash
+exit 0
+"""
+
+# Finds the value that follows -o and writes a .part sibling, sleeps briefly
+# (giving the test time to observe mid-download state), then renames it into
+# place and exits 0 — a slow-motion successful yt-dlp run.
+STUB_SLOW_SUCCESS = """#!/bin/bash
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+echo -n "partial bytes" > "$out.part"
+sleep {sleep}
+mv "$out.part" "$out"
+exit 0
+"""
+
+# Fails every attempt with a permanent (non-transient) error, after leaving a
+# .part sibling behind — like a real yt-dlp crash mid-download.
+STUB_PERMANENT_FAILURE = """#!/bin/bash
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+echo -n "partial bytes" > "$out.part"
+echo "ERROR: This video is private" >&2
+exit 1
+"""
+
+# Segment attempts (--download-sections present) fail transiently, forcing
+# the runner into the full-download+local-cut fallback; full attempts (used
+# by both a plain full-mode grab and the fallback's whole-video temp) write
+# real bytes to the requested output path and succeed.
+STUB_SEGMENT_FAILS_FULL_SUCCEEDS = """#!/bin/bash
+for arg in "$@"; do
+  if [ "$arg" = "--download-sections" ]; then
+    echo "ERROR: unable to download video data: HTTP Error 403: Forbidden" >&2
+    exit 1
+  fi
+done
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+echo -n "full video bytes" > "$out"
+exit 0
+"""
+
+# ffmpeg stand-in for the fallback's local cut: writes to its last argument
+# (the destination the runner asked ffmpeg to cut into).
+STUB_FFMPEG_CUT = """#!/bin/bash
+last="${@: -1}"
+echo -n "cut segment bytes" > "$last"
+exit 0
+"""
+
+
+def _write_stub(path, script, **fmt):
+    path.write_text(script.format(**fmt) if fmt else script)
+    path.chmod(0o755)
+
+
+def _base_cfg(tmp, ytdlp, ffmpeg):
+    return {
+        "destinations": [{"id": "d1", "label": "test", "path": tmp}],
+        "destination_id": "d1",
+        "quality": "max", "accurate_cut": False,
+        "compat_transcode": False, "cookies_browser": "none",
+        "template_segment": "{title} {n}", "template_full": "{title} {n}",
+        "ytdlp_path": str(ytdlp), "ffmpeg_path": str(ffmpeg),
+    }
+
+
+@unittest.skipIf(sys.platform == "win32", "bash stub")
+class RunEndToEndTests(unittest.TestCase):
+    """Exercises the real run() entry point (not just _deliver in isolation)
+    over the riskiest paths the staging/delivery change touches: the
+    destination staying clean mid-download, a failed download leaving no
+    trace, a bad staging folder being reported instead of raised, and the
+    fallback's cut being delivered out of staging like everything else.
+
+    Reuses FallbackFailureLadderTests' bash-stub-stands-in-for-yt-dlp
+    harness rather than inventing a new one.
+    """
+
+    def test_stage_dir_error_is_reported_not_raised(self):
+        # A plain file sitting where .fg-tmp should be makes
+        # config.ensure_stage_dir's mkdir raise OSError. run() must catch it
+        # and report a normal job failure — not let it escape to the caller
+        # as an unhandled exception (jobs.py would surface that as an opaque
+        # "internal error: [Errno ...]").
+        with tempfile.TemporaryDirectory() as tmp, \
+             tempfile.TemporaryDirectory() as tools:
+            dest = Path(tmp)
+            (dest / ".fg-tmp").write_bytes(b"not a directory")
+            noop = Path(tools) / "noop"
+            _write_stub(noop, STUB_NOOP)
+            cfg = _base_cfg(tmp, noop, noop)
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="full")
+            ok, error, final = r.run(job)
+            self.assertFalse(ok)
+            self.assertIn("staging folder unavailable", error)
+            self.assertEqual(final, "")
+
+    def test_bytes_are_staged_and_destination_holds_no_partial_name_mid_download(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             tempfile.TemporaryDirectory() as tools:
+            dest = Path(tmp)
+            stub = Path(tools) / "ytdlp-stub"
+            _write_stub(stub, STUB_SLOW_SUCCESS, sleep=0.4)
+            cfg = _base_cfg(tmp, stub, "/bin/ls")
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="full")
+            result = {}
+            t = threading.Thread(target=lambda: result.setdefault("out", r.run(job)))
+            t.start()
+            try:
+                deadline = time.time() + 5
+                observed_mid_download = False
+                while time.time() < deadline and t.is_alive():
+                    stage = dest / ".fg-tmp"
+                    if stage.is_dir() and any(stage.iterdir()):
+                        observed_mid_download = True
+                        visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
+                        self.assertEqual(visible, [])
+                        break
+                    time.sleep(0.02)
+            finally:
+                t.join(timeout=5)
+            self.assertTrue(observed_mid_download, "never observed staged bytes mid-download")
+            ok, error, final = result["out"]
+            self.assertTrue(ok, error)
+            final_path = Path(final)
+            self.assertEqual(final_path.parent, dest)
+            self.assertTrue(final_path.is_file())
+
+    def test_failed_download_leaves_destination_and_staging_clean(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             tempfile.TemporaryDirectory() as tools:
+            dest = Path(tmp)
+            stub = Path(tools) / "ytdlp-stub"
+            _write_stub(stub, STUB_PERMANENT_FAILURE)
+            cfg = _base_cfg(tmp, stub, "/bin/ls")
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="full")
+            ok, error, final = r.run(job)
+            self.assertFalse(ok)
+            self.assertEqual(final, "")
+            visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
+            self.assertEqual(visible, [])
+            stage = dest / ".fg-tmp"
+            self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
+
+    def test_fallback_cut_is_delivered_from_staging(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             tempfile.TemporaryDirectory() as tools:
+            dest = Path(tmp)
+            ytdlp_stub = Path(tools) / "ytdlp-stub"
+            _write_stub(ytdlp_stub, STUB_SEGMENT_FAILS_FULL_SUCCEEDS)
+            ffmpeg_stub = Path(tools) / "ffmpeg-stub"
+            _write_stub(ffmpeg_stub, STUB_FFMPEG_CUT)
+            cfg = _base_cfg(tmp, ytdlp_stub, ffmpeg_stub)
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="segment", start=1, end=5)
+            with mock.patch.object(prefetch, "fetch_duration", return_value=60), \
+                 mock.patch.object(DownloadRunner, "_sleep_unless_canceled",
+                                   return_value=True):
+                ok, error, final = r.run(job)
+            self.assertTrue(ok, error)
+            final_path = Path(final)
+            self.assertTrue(final_path.is_file())
+            self.assertEqual(final_path.parent, dest)
+            self.assertNotIn(".fg-tmp", final_path.parts)
+            self.assertEqual(final_path.read_bytes(), b"cut segment bytes")
+            stage = dest / ".fg-tmp"
+            self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
 
 
 if __name__ == "__main__":

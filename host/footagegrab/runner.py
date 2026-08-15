@@ -18,6 +18,11 @@ log = logging.getLogger("footagegrab.runner")
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 _PROCESSING_PREFIXES = ("[Merger]", "[Fixup", "[VideoRemuxer", "[VideoConvertor")
 _FINAL_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4a"}
+# Staging-only intermediates that share the job's stem and a "final" suffix,
+# and must never be mistaken for the finished output by _find_output: the
+# fallback's whole-video temp (<stem>.full.mp4) and the compat-transcode
+# scratch file (<stem>.h264tmp.mp4).
+_INTERMEDIATE_MARKERS = (".full.", ".h264tmp.")
 
 
 def sweep_stage_dir(out_dir):
@@ -53,7 +58,10 @@ class DownloadRunner:
             out_dir = config.ensure_output_dir(cfg)
         except OSError as exc:
             return False, f"output folder unavailable: {exc}", ""
-        stage_dir = config.ensure_stage_dir(out_dir)
+        try:
+            stage_dir = config.ensure_stage_dir(out_dir)
+        except OSError as exc:
+            return False, f"staging folder unavailable: {exc}", ""
 
         quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
@@ -418,6 +426,7 @@ class DownloadRunner:
         candidates = [
             p for p in path.parent.glob(f"{stem}.*")
             if p.suffix.lower() in _FINAL_EXTS and ".part" not in p.name
+            and not any(marker in p.name for marker in _INTERMEDIATE_MARKERS)
         ]
         if not candidates:
             return None
