@@ -96,7 +96,19 @@ def load():
         pass
     if cfg.get("quality") == "best":  # pre-0.2 configs
         cfg["quality"] = "max"
-    return _migrate(cfg, stored)
+    _migrate(cfg, stored)
+    # Persist a migration the first time it happens. The Premiere panel reads
+    # config.json directly, in its own process — it never speaks to the host —
+    # so a migration that only lived in memory would leave the panel watching
+    # the old default while downloads landed in the migrated destination.
+    # Writing also drops the retired output_dir/project_* keys. Idempotent:
+    # once "destinations" is on disk, _migrate returns early and this is skipped.
+    if cfg.get("destinations") and "destinations" not in stored:
+        try:
+            save(cfg)
+        except OSError:
+            log.warning("could not persist the destinations migration", exc_info=True)
+    return cfg
 
 
 def save(cfg):

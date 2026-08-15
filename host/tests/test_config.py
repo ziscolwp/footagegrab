@@ -154,3 +154,58 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MigrationPersistenceTests(unittest.TestCase):
+    """The Premiere panel reads config.json directly, in its own process — it
+    never talks to the host. A migration that only ever lives in memory is
+    therefore invisible to it, and the panel watches the wrong folder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("FOOTAGEGRAB_HOME")
+        os.environ["FOOTAGEGRAB_HOME"] = self.tmp.name
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("FOOTAGEGRAB_HOME", None)
+        else:
+            os.environ["FOOTAGEGRAB_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def _on_disk(self):
+        return json.loads(config.config_path().read_text("utf-8"))
+
+    def test_migrating_a_legacy_config_writes_destinations_to_disk(self):
+        legacy = str(Path(self.tmp.name) / "old-folder")
+        config.save({"output_dir": legacy, "quality": "max"})
+        config.load()
+        stored = self._on_disk()
+        self.assertIn("destinations", stored)
+        self.assertEqual(stored["destinations"][0]["path"], legacy)
+        self.assertEqual(stored["destination_id"], stored["destinations"][0]["id"])
+
+    def test_migration_drops_the_legacy_keys_from_disk(self):
+        config.save({"output_dir": "~/a", "project_output_dir": "/tmp/claimed",
+                     "project_output_dir_ts": 9e9})
+        config.load()
+        stored = self._on_disk()
+        self.assertNotIn("output_dir", stored)
+        self.assertNotIn("project_output_dir", stored)
+
+    def test_load_does_not_rewrite_once_already_migrated(self):
+        config.save({"output_dir": str(Path(self.tmp.name) / "x")})
+        config.load()
+        before = config.config_path().stat().st_mtime_ns
+        for _ in range(3):
+            config.load()
+        self.assertEqual(config.config_path().stat().st_mtime_ns, before)
+
+    def test_an_unwritable_config_dir_does_not_break_load(self):
+        config.save({"output_dir": str(Path(self.tmp.name) / "y")})
+        os.chmod(self.tmp.name, 0o500)
+        try:
+            cfg = config.load()  # must not raise
+            self.assertEqual(len(config.destinations(cfg)), 1)
+        finally:
+            os.chmod(self.tmp.name, 0o700)
