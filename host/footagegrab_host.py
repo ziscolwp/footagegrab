@@ -23,7 +23,7 @@ from footagegrab import __version__, config, potsidecar  # noqa: E402
 from footagegrab.jobs import TERMINAL, JobQueue  # noqa: E402
 from footagegrab.nm import NativeMessagingIO  # noqa: E402
 from footagegrab.router import Router  # noqa: E402
-from footagegrab.runner import DownloadRunner  # noqa: E402
+from footagegrab.runner import DownloadRunner, sweep_stage_dir  # noqa: E402
 
 DRAIN_TIMEOUT = 3600  # seconds to let in-flight jobs finish after disconnect
 PROGRESS_PUSH_INTERVAL = 0.5
@@ -51,6 +51,16 @@ def main():
             "pot_idle_shutdown", potsidecar.DEFAULT_IDLE_SHUTDOWN),
     )
     runner = DownloadRunner(config.load, pot=pot)
+
+    # A crash can leave a partial file in the staging folder. Nothing in there
+    # is resumable — yt-dlp re-extracts on every run — so clear it at startup.
+    try:
+        startup_cfg = config.load()
+        if config.selected_destination(startup_cfg):
+            sweep_stage_dir(config.ensure_output_dir(startup_cfg))
+    except OSError:
+        log.warning("could not sweep the staging folder at startup", exc_info=True)
+
     recorded = set()  # job ids already appended to history
     last_push = {}  # job id -> monotonic time of last progress push
 

@@ -54,6 +54,8 @@ class DownloadRunner:
         ffmpeg = config.resolve_tool("ffmpeg", cfg.get("ffmpeg_path"))
         if not ffmpeg:
             return False, "ffmpeg not found. Install it with: brew install ffmpeg", ""
+        if getattr(job, "destination_id", ""):
+            cfg = dict(cfg, destination_id=job.destination_id)
         try:
             out_dir = config.ensure_output_dir(cfg)
         except OSError as exc:

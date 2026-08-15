@@ -11,6 +11,11 @@ import time
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from footagegrab import config  # noqa: E402
+from footagegrab.router import Router  # noqa: E402
+
 HOST = Path(__file__).resolve().parents[1] / "footagegrab_host.py"
 
 STUB_YTDLP = """#!/bin/bash
@@ -34,6 +39,18 @@ def frame(message):
     return struct.pack("<I", len(data)) + data
 
 
+class _FakeQueue:
+    """Records submitted jobs without running them — enough for router tests
+    that only need to inspect the reply, not watch a job finish."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, job):
+        self.jobs.append(job)
+        return job
+
+
 class HostE2ETests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -53,8 +70,19 @@ class HostE2ETests(unittest.TestCase):
             [sys.executable, str(HOST)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
         )
+        # A separate in-process Router against the same FOOTAGEGRAB_HOME, for
+        # tests that check message handling directly rather than round-trip
+        # through the subprocess pipe.
+        self._old_home = os.environ.get("FOOTAGEGRAB_HOME")
+        os.environ["FOOTAGEGRAB_HOME"] = str(home)
+        self.queue = _FakeQueue()
+        self.router = Router(self.queue, runner=None)
 
     def tearDown(self):
+        if self._old_home is None:
+            os.environ.pop("FOOTAGEGRAB_HOME", None)
+        else:
+            os.environ["FOOTAGEGRAB_HOME"] = self._old_home
         if self.proc.stdin and not self.proc.stdin.closed:
             self.proc.stdin.close()
         try:
@@ -138,6 +166,72 @@ class HostE2ETests(unittest.TestCase):
                 self.assertTrue(msg["ok"])
                 self.assertEqual(len(msg["history"]), 2)
                 break
+
+    # -- destination selection messages (router, in-process) ----------------
+
+    def test_set_destination_selects_an_existing_folder(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        reply = self.router.handle({"id": 1, "type": "set_destination", "dest_id": a["id"]})
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["config"]["destination_id"], a["id"])
+
+    def test_set_destination_rejects_an_unknown_id(self):
+        reply = self.router.handle({"id": 1, "type": "set_destination", "dest_id": "nope"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("unknown destination", reply["error"])
+
+    def test_remove_destination_reports_the_new_selection(self):
+        # This fixture's config.json already migrated a legacy output_dir into
+        # one destination (see setUp) — clear it first so "the new selection"
+        # unambiguously means the one this test adds, not that leftover entry.
+        (Path(self.tmp.name) / "config.json").write_text(json.dumps({
+            "destinations": [], "destination_id": "",
+        }))
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        cfg, b = config.add_destination(str(Path(self.tmp.name) / "b"))
+        reply = self.router.handle({"id": 1, "type": "remove_destination", "dest_id": b["id"]})
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["config"]["destination_id"], a["id"])
+
+    def test_choose_folder_message_is_gone(self):
+        reply = self.router.handle({"id": 1, "type": "choose_folder"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("unknown message type", reply["error"])
+
+    def test_enqueue_carries_a_per_job_destination_override(self):
+        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        reply = self.router.handle({
+            "id": 1, "type": "enqueue", "mode": "full",
+            "url": "https://youtube.com/watch?v=abc", "destination_id": a["id"],
+        })
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["jobs"][0]["destination_id"], a["id"])
+
+    def test_enqueue_refuses_when_no_destination_is_set(self):
+        # Same reason as test_remove_destination_reports_the_new_selection:
+        # the fixture's config.json migrates a legacy destination in, so it
+        # must be cleared explicitly for this to test an empty list.
+        (Path(self.tmp.name) / "config.json").write_text(json.dumps({
+            "destinations": [], "destination_id": "",
+        }))
+        reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                    "url": "https://youtube.com/watch?v=abc"})
+        self.assertFalse(reply["ok"])
+        self.assertIn("no destination set", reply["error"])
+
+    def test_enqueue_refuses_an_unwritable_destination_and_names_it(self):
+        blocked = Path(self.tmp.name) / "blocked"
+        blocked.mkdir()
+        blocked.chmod(0o500)
+        try:
+            config.add_destination(str(blocked))
+            reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                        "url": "https://youtube.com/watch?v=abc"})
+            self.assertFalse(reply["ok"])
+            self.assertIn(str(blocked), reply["error"])
+        finally:
+            blocked.chmod(0o700)
 
 
 if __name__ == "__main__":
