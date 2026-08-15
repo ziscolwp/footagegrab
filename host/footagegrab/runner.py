@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -77,12 +78,13 @@ class DownloadRunner:
     def run(self, job, on_progress=None):
         """Blocking download for one job. Returns (ok, error, final_path)."""
         cfg = self._get_config()
+        pkg = "winget install" if sys.platform == "win32" else "brew install"
         ytdlp = config.resolve_tool("yt-dlp", cfg.get("ytdlp_path"))
         if not ytdlp:
-            return False, "yt-dlp not found. Install it with: brew install yt-dlp", ""
+            return False, f"yt-dlp not found. Install it with: {pkg} yt-dlp", ""
         ffmpeg = config.resolve_tool("ffmpeg", cfg.get("ffmpeg_path"))
         if not ffmpeg:
-            return False, "ffmpeg not found. Install it with: brew install ffmpeg", ""
+            return False, f"ffmpeg not found. Install it with: {pkg} ffmpeg", ""
         if getattr(job, "destination_id", ""):
             cfg = dict(cfg, destination_id=job.destination_id)
         try:

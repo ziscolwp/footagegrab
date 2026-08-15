@@ -12,6 +12,13 @@ let seq = 0;
 const pending = new Map(); // request id -> {resolve, reject, timer}
 const jobs = new Map(); // job id -> latest job dict (session mirror)
 
+// Resolved async at worker start; the neutral default covers the window
+// before the callback lands (and any OS the check doesn't recognise).
+let installCmd = "the installer (install.sh / install.bat)";
+chrome.runtime.getPlatformInfo(info => {
+  installCmd = info.os === "win" ? "install\\install.bat" : "install/install.sh";
+});
+
 function connect() {
   if (port) return port;
   port = chrome.runtime.connectNative(HOST_NAME);
@@ -32,7 +39,7 @@ function hostRequest(msg, timeoutMs = DEFAULT_TIMEOUT_MS) {
     try {
       p = connect();
     } catch (e) {
-      reject(new Error("Native host not installed — run install/install.sh and restart the browser"));
+      reject(new Error(`Native host not installed — run ${installCmd} and restart the browser`));
       return;
     }
     const id = ++seq;

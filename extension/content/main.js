@@ -167,9 +167,11 @@
           const n = count || 1;
           window.FG.overlay.flash(count ? `${n} clip${n > 1 ? "s" : ""} queued` : "Full video queued");
         } else {
+          const installer = /win/i.test(navigator.platform || "")
+            ? "install\\install.bat" : "install.sh";
           window.FG.toasts.show("error", res?.error || "Could not reach the download host", {
             actions: [{ label: "Help", fn: () => window.FG.toasts.show("info",
-              "Run install.sh, fully restart the browser, then click the FootageGrab toolbar icon to check host status.", { timeout: 12000 }) }],
+              `Run ${installer}, fully restart the browser, then click the FootageGrab toolbar icon to check host status.`, { timeout: 12000 }) }],
           });
         }
       })

@@ -12,6 +12,18 @@ function setStatus(state, text) {
   $("status-text").textContent = text;
 }
 
+// The UI ships with macOS wording; swap it for Windows users.
+chrome.runtime.getPlatformInfo(info => {
+  if (info.os !== "win") return;
+  const install = $("setup-step-install");
+  install.textContent = "";
+  install.append("Double-click ", Object.assign(document.createElement("code"),
+    { textContent: "install\\install.bat" }), " in the FootageGrab folder");
+  $("setup-step-restart").textContent =
+    "Close the browser fully (every window) and reopen it";
+  $("open-folder").textContent = "Open in Explorer";
+});
+
 function wireTabs() {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => {

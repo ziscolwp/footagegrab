@@ -77,12 +77,17 @@ export function paint() {
   $("tpl-full-preview").textContent = previewName(config.template_full);
 }
 
+let installTool = name => `brew install ${name}`;
+chrome.runtime.getPlatformInfo(info => {
+  if (info.os === "win") installTool = name => `winget install ${name}`;
+});
+
 export function paintHealth(health) {
   $("ytdlp-version").textContent = health?.ytdlp?.found
-    ? health.ytdlp.version : "missing — brew install yt-dlp";
+    ? health.ytdlp.version : `missing — ${installTool("yt-dlp")}`;
   $("ffmpeg-version").textContent = health?.ffmpeg?.found
     ? (health.ffmpeg.version || "").replace(/^ffmpeg version /, "").split(" ")[0]
-    : "missing — brew install ffmpeg";
+    : `missing — ${installTool("ffmpeg")}`;
   $("logs-path").textContent = health?.logs || "—";
 }
 
