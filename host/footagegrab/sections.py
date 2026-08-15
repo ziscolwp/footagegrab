@@ -23,7 +23,12 @@ VALID_COOKIE_BROWSERS = ("chrome", "brave", "chromium", "edge")
 # hands to ffmpeg (ffmpeg then exits with code 8). These signatures mean "try
 # again, the video itself is fine" — as opposed to login walls or removals.
 _TRANSIENT_MARKERS = (
-    "ffmpeg exited with code 8",
+    # Any nonzero ffmpeg exit during a download is a stream failure: Unix
+    # truncates it to "code 8", Windows reports the raw AVERROR (e.g.
+    # 3436169992 = HTTP 403). Permanent conditions (private video, login
+    # wall) surface as yt-dlp's own ERROR text before ffmpeg ever runs, so
+    # the bare prefix is safe to treat as retryable on every platform.
+    "ffmpeg exited with code",
     "http error 403",
     "unable to continue",  # "fragment N not found, unable to continue"
     "got error:",

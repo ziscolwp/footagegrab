@@ -90,6 +90,14 @@ class TransientErrorTests(unittest.TestCase):
         self.assertTrue(is_transient_error("fragment 3 not found, unable to continue"))
         self.assertTrue(is_transient_error("ERROR: Ffmpeg Exited With Code 8"))  # case-insensitive
 
+    def test_windows_ffmpeg_exit_codes_are_transient(self):
+        # On Windows ffmpeg exits with the raw AVERROR as the process code —
+        # 3436169992 is the unsigned form of AVERROR_HTTP_FORBIDDEN, i.e. the
+        # very same 403 Unix reports as "code 8". Matching only the Unix
+        # spelling made Windows kill the ladder on the first rung.
+        self.assertTrue(is_transient_error("ERROR: ffmpeg exited with code 3436169992"))
+        self.assertTrue(is_transient_error("ERROR: ffmpeg exited with code 3419392776"))  # 404
+
     def test_permanent_errors_do_not_match(self):
         self.assertFalse(is_transient_error("Private video. Sign in if you've been granted access"))
         self.assertFalse(is_transient_error("Video unavailable"))
