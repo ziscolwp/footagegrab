@@ -26,20 +26,55 @@
     return path + "|" + size + "|" + Math.round(mtimeMs);
   }
 
-  // entries: [{name, path, size, mtimeMs}] for the current tick.
-  // prevSizes: {path: size} recorded last tick. seen(key) -> bool is the
-  // persisted dedupe membership. Ready = candidate, not seen, non-zero size
-  // unchanged since last tick. `sizes` covers every unseen candidate so a
-  // failed import stays eligible next tick.
-  function planTick(entries, prevSizes, seen) {
+  // Consecutive unchanged observations required before a file counts as
+  // settled. One was too thin: a cloud-storage placeholder holds a constant
+  // (full) size forever, and a stalled copy looks identical to a finished one
+  // for a single tick.
+  var STABLE_TICKS = 2;
+
+  // Prior state is {path: {size, stable}}; older runs persisted a bare number,
+  // so both shapes are read.
+  function prevSize(v) { return v && typeof v === "object" ? v.size : v; }
+  function prevStable(v) { return v && typeof v === "object" ? Number(v.stable) || 0 : 0; }
+
+  // A downloader writing "clip.mp4.part" means "clip.mp4" is still being
+  // assembled, even when the finished name already exists on disk.
+  function partnerInProgress(name, byName) {
+    for (var i = 0; i < TMP_MARKERS.length; i++) {
+      if (byName[(name + TMP_MARKERS[i]).toLowerCase()]) return true;
+    }
+    return false;
+  }
+
+  // entries: [{name, path, size, mtimeMs, hasData}] for the current tick.
+  // hasData is false only when the filesystem reports the file occupies no
+  // blocks — a dataless cloud placeholder, which reports its full logical size
+  // while holding none of the bytes. Undefined means the platform can't tell
+  // (Windows), and is treated as real data.
+  // prev: {path: {size, stable}} recorded last tick. seen(key) -> bool is the
+  // persisted dedupe membership. Ready = candidate, not seen, non-zero size,
+  // real data on disk, no in-progress sibling, and a size that has held steady
+  // across STABLE_TICKS observations. `sizes` covers every unseen candidate so
+  // a failed import stays eligible next tick.
+  function planTick(entries, prev, seen) {
     var ready = [];
     var sizes = {};
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
+    var byName = {};
+    var i, e;
+    for (i = 0; i < entries.length; i++) byName[String(entries[i].name).toLowerCase()] = 1;
+    for (i = 0; i < entries.length; i++) {
+      e = entries[i];
       if (!isCandidateName(e.name)) continue;
       if (seen(dedupeKey(e.path, e.size, e.mtimeMs))) continue;
-      sizes[e.path] = e.size;
-      if (e.size > 0 && prevSizes[e.path] === e.size) ready.push(e);
+
+      var settled = e.size > 0 &&
+        e.hasData !== false &&
+        !partnerInProgress(e.name, byName) &&
+        prevSize(prev[e.path]) === e.size;
+
+      var stable = settled ? prevStable(prev[e.path]) + 1 : 0;
+      sizes[e.path] = { size: e.size, stable: stable };
+      if (stable >= STABLE_TICKS) ready.push(e);
     }
     return { ready: ready, sizes: sizes };
   }
@@ -48,25 +83,12 @@
     return keys.length > max ? keys.slice(keys.length - max) : keys;
   }
 
-  // "<project dir>/<folderName>" from a .prproj path, honoring the path's own
-  // separator style (Windows projects report backslashes). Empty when the
-  // project isn't on disk yet (unsaved: no separator) or sits at the
-  // filesystem root (cut <= 0) — callers fall back to the configured folder.
-  function projectFootageDir(projectPath, folderName) {
-    var p = String(projectPath || "");
-    if (!p) return "";
-    var cut = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-    if (cut <= 0) return "";
-    var sep = p.charAt(cut);
-    return p.slice(0, cut) + sep + (folderName || "FootageGrab");
-  }
-
   var api = {
     isCandidateName: isCandidateName,
     dedupeKey: dedupeKey,
     planTick: planTick,
+    STABLE_TICKS: STABLE_TICKS,
     pruneKeys: pruneKeys,
-    projectFootageDir: projectFootageDir,
   };
 
   // CEP's --mixed-context injects Node's `module` into the page, so this
