@@ -51,7 +51,12 @@ export function paint() {
     select.appendChild(opt);
   }
   if (dests.length) {
-    select.value = config.destination_id || dests[0].id;
+    // Fall back to the first entry when destination_id names no option —
+    // matches config.selected_destination's fallback host-side, so the
+    // dropdown always shows the folder a grab would actually use instead of
+    // rendering blank for a stale id.
+    const known = dests.some(d => d.id === config.destination_id);
+    select.value = known ? config.destination_id : dests[0].id;
   } else {
     const opt = document.createElement("option");
     opt.value = "";
