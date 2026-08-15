@@ -104,7 +104,7 @@ class Router:
         if not config.selected_destination(cfg_now):
             raise AppError("no destination set — add a folder in the extension first")
         try:
-            config.ensure_output_dir(cfg_now)
+            config.validate_output_dir(cfg_now)
         except OSError as exc:
             raise AppError(f"destination unavailable: {exc}") from None
         common = {
@@ -179,8 +179,9 @@ class Router:
 
     def _open_folder(self, msg):
         cfg = config.load()
-        # effective folder, not raw output_dir — while the Premiere panel owns
-        # the target, "Open folder" must open where grabs actually land
+        # effective folder, not raw output_dir — the extension's selected
+        # destination is the source of truth, so "Open folder" must resolve
+        # it the same way the download path does, not open something stale
         path = msg.get("path") or os.path.expanduser(config.effective_output_dir(cfg))
         ok, error = system.open_folder(path)
         if not ok:

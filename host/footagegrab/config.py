@@ -6,11 +6,14 @@ that misses Homebrew, so we augment PATH before resolving yt-dlp/ffmpeg.
 """
 
 import json
+import logging
 import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+log = logging.getLogger("footagegrab.config")
 
 DEFAULTS = {
     # Saved footage folders, chosen from the extension. The legacy single
@@ -242,9 +245,32 @@ def effective_output_dir(cfg):
 
 
 def ensure_output_dir(cfg):
-    """Expand, create, and sanity-check the output folder. Raises OSError."""
+    """Expand, create, and sanity-check the output folder. Raises OSError.
+
+    Only safe to call where creating the folder is the correct behaviour —
+    i.e. on the actual download path in runner.run(). Validation call sites
+    (enqueue-time checks, the startup sweep) must use validate_output_dir
+    instead, or an unmounted destination gets silently recreated as an empty
+    local folder. See validate_output_dir's docstring.
+    """
     path = Path(effective_output_dir(cfg)).expanduser()
     path.mkdir(parents=True, exist_ok=True)
+    if not os.access(path, os.W_OK):
+        raise OSError(f"not writable: {path}")
+    return path
+
+
+def validate_output_dir(cfg):
+    """Expand and sanity-check the output folder without creating it.
+
+    Raises OSError naming the folder when it is missing or unwritable. Use
+    this at validation call sites (enqueue, startup sweep) — creating a
+    missing destination there would, e.g., silently recreate an unmounted
+    external-volume path as an empty folder on the internal disk.
+    """
+    path = Path(effective_output_dir(cfg)).expanduser()
+    if not path.is_dir():
+        raise OSError(f"not found: {path}")
     if not os.access(path, os.W_OK):
         raise OSError(f"not writable: {path}")
     return path
@@ -262,7 +288,10 @@ def ensure_stage_dir(out_dir):
     from . import system  # local import: system imports config at module level
     stage = Path(out_dir) / STAGE_DIR_NAME
     stage.mkdir(parents=True, exist_ok=True)
-    system.mark_cloud_ignored(stage)
+    if not system.mark_cloud_ignored(stage):
+        log.warning("could not set the Dropbox-ignore marker on %s — "
+                    "delivery is still atomic, but this folder's partial "
+                    "downloads will sync until it is removed", stage)
     return stage
 
 

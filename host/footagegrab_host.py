@@ -54,13 +54,16 @@ def main():
 
     # A crash can leave a partial file in the staging folder. Nothing in there
     # is resumable — yt-dlp re-extracts on every run — so clear it at startup.
-    # Best-effort: a malformed stored path can raise ValueError/RuntimeError
-    # (not just OSError) out of ensure_output_dir, and this must never stop
-    # the host from starting up and answering messages.
+    # This only validates the destination (never creates it): an unmounted
+    # external volume must stay unmounted, not get silently recreated as an
+    # empty folder on the internal disk. Best-effort: a malformed stored path
+    # can raise ValueError/RuntimeError (not just OSError) out of
+    # validate_output_dir, and this must never stop the host from starting up
+    # and answering messages.
     try:
         startup_cfg = config.load()
         if config.selected_destination(startup_cfg):
-            sweep_stage_dir(config.ensure_output_dir(startup_cfg))
+            sweep_stage_dir(config.validate_output_dir(startup_cfg))
     except Exception:
         log.warning("could not sweep the staging folder at startup", exc_info=True)
 

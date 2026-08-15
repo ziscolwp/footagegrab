@@ -91,7 +91,12 @@ class DeliverAndSweepTests(unittest.TestCase):
             self.assertTrue(final.is_file())
             self.assertFalse(staged.exists())
 
-    def test_deliver_never_overwrites_an_existing_clip(self):
+    def test_deliver_picks_a_new_name_single_threaded_when_one_already_exists(self):
+        # Pins _deliver's single-threaded rename-around-a-collision behaviour
+        # only. It does NOT test the concurrent-delivery guarantee its old
+        # name implied: unique_path picks the name and os.replace lands the
+        # file as two separate steps, leaving a known, deliberately accepted
+        # TOCTOU window if two deliveries race for the same stem at once.
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)
             (dest / "clip.mp4").write_bytes(b"original")
@@ -350,6 +355,31 @@ class RunEndToEndTests(unittest.TestCase):
             self.assertEqual(final_path.read_bytes(), b"cut segment bytes")
             stage = dest / ".fg-tmp"
             self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
+
+    def test_replace_failure_fails_the_job_and_leaves_no_trace(self):
+        # Pins the spec's error-table row for os.replace failing (permissions,
+        # vanished folder): the job must fail, the staged file must be gone,
+        # the destination must be untouched, and the error must name it.
+        with tempfile.TemporaryDirectory() as tmp, \
+             tempfile.TemporaryDirectory() as tools:
+            dest = Path(tmp)
+            stub = Path(tools) / "ytdlp-stub"
+            _write_stub(stub, STUB_SLOW_SUCCESS, sleep=0)
+            cfg = _base_cfg(tmp, stub, "/bin/ls")
+            r = DownloadRunner(lambda: cfg)
+            job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
+                      title="Clip", mode="full")
+            with mock.patch("footagegrab.runner.os.replace",
+                             side_effect=OSError("permission denied")):
+                ok, error, final = r.run(job)
+            self.assertFalse(ok)
+            self.assertEqual(final, "")
+            self.assertIn(str(dest), error)
+            visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
+            self.assertEqual(visible, [], "destination must be untouched")
+            stage = dest / ".fg-tmp"
+            self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [],
+                              "staged file must be removed")
 
     def test_destination_override_on_the_job_redirects_the_delivered_file(self):
         # d1 stays the config's *selected* destination throughout — only the

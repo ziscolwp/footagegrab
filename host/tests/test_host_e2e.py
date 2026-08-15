@@ -200,7 +200,9 @@ class HostE2ETests(unittest.TestCase):
         self.assertIn("unknown message type", reply["error"])
 
     def test_enqueue_carries_a_per_job_destination_override(self):
-        cfg, a = config.add_destination(str(Path(self.tmp.name) / "a"))
+        folder = Path(self.tmp.name) / "a"
+        folder.mkdir()
+        cfg, a = config.add_destination(str(folder))
         reply = self.router.handle({
             "id": 1, "type": "enqueue", "mode": "full",
             "url": "https://youtube.com/watch?v=abc", "destination_id": a["id"],
@@ -250,6 +252,55 @@ class HostE2ETests(unittest.TestCase):
             self.assertIn(str(blocked), reply["error"])
         finally:
             blocked.chmod(0o700)
+
+    def test_enqueue_refuses_a_missing_destination_and_does_not_create_it(self):
+        # config.validate_output_dir must only check, never mkdir — creating
+        # an unmounted external-volume path here would silently redirect
+        # every future grab to the internal disk once the real drive mounts.
+        missing = Path(self.tmp.name) / "not-yet-mounted"
+        config.add_destination(str(missing))
+        reply = self.router.handle({"id": 1, "type": "enqueue", "mode": "full",
+                                    "url": "https://youtube.com/watch?v=abc"})
+        self.assertFalse(reply["ok"])
+        self.assertIn(str(missing), reply["error"])
+        self.assertFalse(missing.exists(), "enqueue must not create the destination")
+
+    def test_startup_sweep_removes_a_leftover_staging_folder(self):
+        # Happy-path counterpart to test_startup_sweep_failure_does_not_block_
+        # boot below: a real, valid destination with a .fg-tmp left behind by
+        # a crash must actually be swept on the next boot, not just fail to
+        # crash the host when the sweep itself errors out.
+        home2 = Path(self.tmp.name) / "home3"
+        home2.mkdir()
+        dest = home2 / "footage"
+        dest.mkdir()
+        stage = dest / ".fg-tmp"
+        stage.mkdir()
+        (stage / "orphan.mp4.part").write_bytes(b"junk")
+        (home2 / "config.json").write_text(json.dumps({
+            "destinations": [{"id": "d1", "label": "footage", "path": str(dest)}],
+            "destination_id": "d1",
+        }))
+        env = dict(os.environ, FOOTAGEGRAB_HOME=str(home2))
+        proc = subprocess.Popen(
+            [sys.executable, str(HOST)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+        )
+        try:
+            header = proc.stdout.read(4)
+            self.assertEqual(len(header), 4, "host crashed before sending hello")
+            (length,) = struct.unpack("<I", header)
+            hello = json.loads(proc.stdout.read(length).decode())
+            self.assertEqual(hello.get("type"), "hello")
+            # The sweep runs before "hello" is written, so it has already
+            # happened by the time this is observed.
+            self.assertFalse(stage.exists(), "leftover .fg-tmp must be swept at startup")
+        finally:
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
     def test_startup_sweep_failure_does_not_block_boot(self):
         # A malformed stored path (an embedded NUL byte) makes

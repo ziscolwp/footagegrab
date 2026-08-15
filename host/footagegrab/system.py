@@ -21,14 +21,16 @@ def mark_cloud_ignored(path):
 
     macOS note: CPython's os.setxattr is Linux-only (not exposed on Darwin),
     so the attribute is written via the `xattr` CLI that ships with macOS
-    instead.
+    instead. Invoked by absolute path (/usr/bin/xattr): config.augment_path()
+    prepends /opt/homebrew/bin to PATH for yt-dlp/ffmpeg resolution, and a
+    Homebrew-installed xattr would otherwise shadow the system one.
     """
     path = Path(path)
     if not path.exists():
         return False
     try:
         if sys.platform == "darwin":
-            proc = _run(["xattr", "-w", "com.dropbox.ignored", "1", str(path)],
+            proc = _run(["/usr/bin/xattr", "-w", "com.dropbox.ignored", "1", str(path)],
                         timeout=10)
             return proc.returncode == 0
         if sys.platform == "win32":
