@@ -1,8 +1,11 @@
+# TODO: split by concern
 """Run yt-dlp for a job, stream progress, and clean up after failures."""
 
 import collections
 import logging
+import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -15,6 +18,17 @@ log = logging.getLogger("footagegrab.runner")
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 _PROCESSING_PREFIXES = ("[Merger]", "[Fixup", "[VideoRemuxer", "[VideoConvertor")
 _FINAL_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4a"}
+
+
+def sweep_stage_dir(out_dir):
+    """Remove a staging folder left by a crash. Safe when absent."""
+    stage = Path(out_dir) / config.STAGE_DIR_NAME
+    if not stage.is_dir():
+        return
+    try:
+        shutil.rmtree(stage)
+    except OSError:
+        log.warning("could not sweep %s", stage, exc_info=True)
 
 
 class DownloadRunner:
@@ -39,12 +53,14 @@ class DownloadRunner:
             out_dir = config.ensure_output_dir(cfg)
         except OSError as exc:
             return False, f"output folder unavailable: {exc}", ""
+        stage_dir = config.ensure_stage_dir(out_dir)
 
         quality = job.quality or cfg.get("quality", "max")
         accurate = cfg.get("accurate_cut", False) if job.accurate is None else job.accurate
         cookies = cfg.get("cookies_browser")
         self._ensure_metadata(job, cfg, ytdlp, on_progress)
-        path = self._plan_path(job, cfg, out_dir, quality)
+        planned = self._plan_path(job, cfg, out_dir, quality)
+        path = stage_dir / planned.name
 
         # Transient stream failures (YouTube 403s the URLs it just issued;
         # ffmpeg exits with code 8) climb a ladder: plain run -> delayed retry
@@ -133,6 +149,11 @@ class DownloadRunner:
             if cerr == "canceled":
                 Path(final).unlink(missing_ok=True)
                 return False, "canceled", ""
+        try:
+            final = self._deliver(Path(final), out_dir)
+        except OSError as exc:
+            Path(final).unlink(missing_ok=True)
+            return False, f"could not deliver to {out_dir}: {exc}", ""
         log.info("job %s done: %s", job.id, final)
         return True, "", str(final)
 
@@ -188,9 +209,8 @@ class DownloadRunner:
         if job.cancel_requested:
             return False, "canceled", ""
         log.info("job %s: falling back to full download + local cut", job.id)
-        tmp_dir = Path(out_dir) / ".fg-tmp"
         try:
-            tmp_dir.mkdir(exist_ok=True)
+            tmp_dir = config.ensure_stage_dir(out_dir)
         except OSError as exc:
             return False, f"fallback temp folder unavailable: {exc}", ""
         tmp_path = tmp_dir / (path.stem + ".full.mp4")
@@ -234,13 +254,11 @@ class DownloadRunner:
 
     @staticmethod
     def _cleanup_fallback_tmp(tmp_path, full_path=None):
+        # The staging folder is shared with other jobs (see run()) — never
+        # remove it here, only the files this fallback attempt created.
         for p in (tmp_path, full_path):
             if p:
                 Path(p).unlink(missing_ok=True)
-        try:
-            Path(tmp_path).parent.rmdir()  # only succeeds when empty
-        except OSError:
-            pass
 
     @staticmethod
     def _sleep_unless_canceled(job, seconds):
@@ -349,6 +367,21 @@ class DownloadRunner:
             template = cfg.get("template_full", config.DEFAULTS["template_full"])
         stem = naming.render_template(template, fields)
         return naming.unique_path(out_dir, stem, ".mp4")
+
+    @staticmethod
+    def _deliver(staged_path, out_dir):
+        """Move a finished file out of staging. Returns its final path.
+
+        os.replace is atomic within a volume, so the destination goes from
+        "no such file" to "complete file" with nothing observable between —
+        which is what keeps Dropbox and the Premiere watcher from ever seeing
+        a partial clip. The unique name is resolved here, at delivery time,
+        because post-processing can change the extension.
+        """
+        staged_path = Path(staged_path)
+        final = naming.unique_path(out_dir, staged_path.stem, staged_path.suffix)
+        os.replace(staged_path, final)
+        return final
 
     def _register(self, job_id, proc):
         with self._lock:
