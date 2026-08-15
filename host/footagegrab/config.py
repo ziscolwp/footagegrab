@@ -5,6 +5,7 @@ FOOTAGEGRAB_HOME for tests). Chrome launches native hosts with a minimal PATH
 that misses Homebrew, so we augment PATH before resolving yt-dlp/ffmpeg.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -291,19 +292,51 @@ def validate_output_dir(cfg):
 STAGE_DIR_NAME = ".fg-tmp"
 
 
-def ensure_stage_dir(out_dir):
-    """Staging folder inside the destination, hidden from Dropbox.
+def _same_volume(a, b):
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return False
 
-    It must live on the destination's volume — delivery is an os.replace, and
-    that is only atomic within one filesystem.
+
+def stage_root():
+    """Parent of every local staging folder, inside the app home."""
+    return app_home() / "stage"
+
+
+def stage_dir_for(out_dir):
+    """Where staging for a destination lives. Decides only — creates nothing.
+
+    Staging must stay outside the destination whenever the volumes allow it:
+    the Dropbox File Provider client syncs an in-destination staging folder
+    even when it carries com.dropbox.ignored, so partial .part files upload
+    mid-download and the finish-rename races that upload — the sync engine
+    then reconciles by resurrecting the .part and deleting the delivered
+    file, yanking the clip out from under Premiere. Staged outside, the
+    destination only ever sees the one atomic appearance of a finished file.
+
+    Delivery is an os.replace, only atomic within one filesystem, so a
+    destination on a different volume (external drive) falls back to the
+    hidden folder inside it.
     """
-    from . import system  # local import: system imports config at module level
-    stage = Path(out_dir) / STAGE_DIR_NAME
+    out_dir = Path(out_dir)
+    if _same_volume(app_home(), out_dir):
+        digest = hashlib.sha1(str(out_dir).encode("utf-8")).hexdigest()[:12]
+        return stage_root() / digest
+    return out_dir / STAGE_DIR_NAME
+
+
+def ensure_stage_dir(out_dir):
+    """Create (and, for the in-destination fallback, cloud-hide) the staging
+    folder for a destination."""
+    stage = stage_dir_for(out_dir)
     stage.mkdir(parents=True, exist_ok=True)
-    if not system.mark_cloud_ignored(stage):
-        log.warning("could not set the Dropbox-ignore marker on %s — "
-                    "delivery is still atomic, but this folder's partial "
-                    "downloads will sync until it is removed", stage)
+    if stage.name == STAGE_DIR_NAME:
+        from . import system  # local import: system imports config at module level
+        if not system.mark_cloud_ignored(stage):
+            log.warning("could not set the Dropbox-ignore marker on %s — "
+                        "delivery is still atomic, but this folder's partial "
+                        "downloads will sync until it is removed", stage)
     return stage
 
 

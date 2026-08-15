@@ -5,6 +5,7 @@ A scripted yt-dlp stub fails every attempt with a transient 403; the fallback
 and duration probe are patched so no real downloads or network happen.
 """
 
+import os
 import sys
 import tempfile
 import threading
@@ -78,7 +79,19 @@ class FallbackFailureLadderTests(unittest.TestCase):
 
 
 class DeliverAndSweepTests(unittest.TestCase):
-    """Atomic delivery out of the .fg-tmp staging folder, and crash cleanup."""
+    """Atomic delivery out of the staging folder, and crash cleanup."""
+
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        self._old_home = os.environ.get("FOOTAGEGRAB_HOME")
+        os.environ["FOOTAGEGRAB_HOME"] = self.home.name
+
+    def tearDown(self):
+        if self._old_home is None:
+            os.environ.pop("FOOTAGEGRAB_HOME", None)
+        else:
+            os.environ["FOOTAGEGRAB_HOME"] = self._old_home
+        self.home.cleanup()
 
     def test_deliver_moves_a_staged_file_into_the_destination(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -145,6 +158,17 @@ class DeliverAndSweepTests(unittest.TestCase):
             (stage / "orphan.mp4.part").write_bytes(b"junk")
             runner.sweep_stage_dir(dest)
             self.assertFalse(stage.exists())
+
+    def test_sweep_also_removes_a_legacy_in_destination_staging_folder(self):
+        # Older builds staged inside the destination; a crash there must
+        # still be cleaned up after the upgrade.
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            legacy = dest / config.STAGE_DIR_NAME
+            legacy.mkdir()
+            (legacy / "orphan.mp4.part").write_bytes(b"junk")
+            runner.sweep_stage_dir(dest)
+            self.assertFalse(legacy.exists())
 
     def test_sweep_is_safe_when_there_is_nothing_to_sweep(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -251,8 +275,20 @@ class RunEndToEndTests(unittest.TestCase):
     harness rather than inventing a new one.
     """
 
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        self._old_home = os.environ.get("FOOTAGEGRAB_HOME")
+        os.environ["FOOTAGEGRAB_HOME"] = self.home.name
+
+    def tearDown(self):
+        if self._old_home is None:
+            os.environ.pop("FOOTAGEGRAB_HOME", None)
+        else:
+            os.environ["FOOTAGEGRAB_HOME"] = self._old_home
+        self.home.cleanup()
+
     def test_stage_dir_error_is_reported_not_raised(self):
-        # A plain file sitting where .fg-tmp should be makes
+        # A plain file sitting where the staging root should be makes
         # config.ensure_stage_dir's mkdir raise OSError. run() must catch it
         # and report a normal job failure — not let it escape to the caller
         # as an unhandled exception (jobs.py would surface that as an opaque
@@ -260,7 +296,7 @@ class RunEndToEndTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              tempfile.TemporaryDirectory() as tools:
             dest = Path(tmp)
-            (dest / ".fg-tmp").write_bytes(b"not a directory")
+            config.stage_root().write_bytes(b"not a directory")
             noop = Path(tools) / "noop"
             _write_stub(noop, STUB_NOOP)
             cfg = _base_cfg(tmp, noop, noop)
@@ -288,8 +324,8 @@ class RunEndToEndTests(unittest.TestCase):
             try:
                 deadline = time.time() + 5
                 observed_mid_download = False
+                stage = config.stage_dir_for(dest)
                 while time.time() < deadline and t.is_alive():
-                    stage = dest / ".fg-tmp"
                     if stage.is_dir() and any(stage.iterdir()):
                         observed_mid_download = True
                         visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
@@ -323,10 +359,10 @@ class RunEndToEndTests(unittest.TestCase):
             # emptiness (which a pre-staging runner, writing straight into
             # dest and relying on _cleanup_partials, would also satisfy):
             # the -o path the runner actually gave yt-dlp must sit inside
-            # .fg-tmp, and .fg-tmp must have been created for this run.
+            # the staging folder, which must have been created for this run.
+            stage = config.stage_dir_for(dest)
             argv = log.read_text()
-            self.assertIn(str(dest / ".fg-tmp"), argv)
-            stage = dest / ".fg-tmp"
+            self.assertIn(str(stage), argv)
             self.assertTrue(stage.is_dir())
             self.assertEqual(list(stage.iterdir()), [])
             visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
@@ -354,7 +390,7 @@ class RunEndToEndTests(unittest.TestCase):
             self.assertEqual(final_path.parent, dest)
             self.assertNotIn(".fg-tmp", final_path.parts)
             self.assertEqual(final_path.read_bytes(), b"cut segment bytes")
-            stage = dest / ".fg-tmp"
+            stage = config.stage_dir_for(dest)
             self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
 
     def test_replace_failure_fails_the_job_and_leaves_no_trace(self):
@@ -378,7 +414,7 @@ class RunEndToEndTests(unittest.TestCase):
             self.assertIn(str(dest), error)
             visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
             self.assertEqual(visible, [], "destination must be untouched")
-            stage = dest / ".fg-tmp"
+            stage = config.stage_dir_for(dest)
             self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [],
                               "staged file must be removed")
 

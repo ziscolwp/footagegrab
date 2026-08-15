@@ -130,12 +130,41 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.effective_output_dir(cfg),
                          config.DEFAULT_DESTINATION)
 
-    def test_ensure_stage_dir_creates_a_marked_folder_inside_the_destination(self):
+    def test_stage_dir_lives_outside_a_same_volume_destination(self):
+        # Cloud clients (Dropbox File Provider) sync a staging folder inside
+        # the destination even when it is marked com.dropbox.ignored; partial
+        # files upload mid-download and the finish-rename races the upload,
+        # after which the sync engine reconciles by deleting the delivered
+        # file. Staging must therefore live outside the destination whenever
+        # the volumes allow it.
         dest = Path(self.tmp.name) / "Videos"
         dest.mkdir()
         stage = config.ensure_stage_dir(dest)
+        self.assertTrue(stage.is_dir())
+        self.assertNotIn(dest, stage.parents)
+        self.assertIn(config.stage_root(), stage.parents)
+
+    def test_stage_dir_falls_back_inside_a_cross_volume_destination(self):
+        # os.replace is only atomic within one filesystem, so a destination
+        # on another volume (external drive) keeps the hidden in-destination
+        # staging folder.
+        dest = Path(self.tmp.name) / "Videos"
+        dest.mkdir()
+        orig = config._same_volume
+        config._same_volume = lambda a, b: False
+        try:
+            stage = config.ensure_stage_dir(dest)
+        finally:
+            config._same_volume = orig
         self.assertEqual(stage, dest / ".fg-tmp")
         self.assertTrue(stage.is_dir())
+
+    def test_stage_dirs_do_not_collide_across_destinations(self):
+        a = Path(self.tmp.name) / "A"
+        b = Path(self.tmp.name) / "B"
+        a.mkdir()
+        b.mkdir()
+        self.assertNotEqual(config.ensure_stage_dir(a), config.ensure_stage_dir(b))
 
     def test_ensure_stage_dir_is_idempotent(self):
         dest = Path(self.tmp.name) / "Videos"

@@ -26,14 +26,21 @@ _INTERMEDIATE_MARKERS = (".full.", ".h264tmp.")
 
 
 def sweep_stage_dir(out_dir):
-    """Remove a staging folder left by a crash. Safe when absent."""
-    stage = Path(out_dir) / config.STAGE_DIR_NAME
-    if not stage.is_dir():
-        return
-    try:
-        shutil.rmtree(stage)
-    except OSError:
-        log.warning("could not sweep %s", stage, exc_info=True)
+    """Remove staging left by a crash: the local staging root and any
+    legacy/fallback folder inside the destination. Safe when absent.
+
+    Nothing staged is resumable (yt-dlp re-extracts on every run), and this
+    runs before any job starts, so clearing the whole local root — not just
+    this destination's slice — is safe and also drops slices left behind by
+    since-removed destinations.
+    """
+    for stage in (Path(out_dir) / config.STAGE_DIR_NAME, config.stage_root()):
+        if not stage.is_dir():
+            continue
+        try:
+            shutil.rmtree(stage)
+        except OSError:
+            log.warning("could not sweep %s", stage, exc_info=True)
 
 
 class DownloadRunner:
@@ -215,7 +222,7 @@ class DownloadRunner:
         """Last rung for segments: download the whole video with yt-dlp's
         native downloader (which survives the 403s that kill ffmpeg's URL
         fetch), then cut the requested section locally. The temp file lives in
-        a hidden subfolder the Premiere watcher never lists."""
+        the staging folder, outside the watched destination."""
         if job.cancel_requested:
             return False, "canceled", ""
         log.info("job %s: falling back to full download + local cut", job.id)
