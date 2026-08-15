@@ -423,10 +423,15 @@ class DownloadRunner:
     def _find_output(path):
         """yt-dlp occasionally lands on a sibling extension; find the real file."""
         stem = path.stem
+        # Markers are matched only against the part of the name after the
+        # stem: _find_output(tmp_path) is itself called with stem "<clip>.full"
+        # (the fallback's whole-video temp) or "<clip>.h264tmp" (the compat
+        # scratch file), and those legitimate stems must not disqualify their
+        # own sibling-extension candidates (e.g. "<clip>.full.mkv").
         candidates = [
             p for p in path.parent.glob(f"{stem}.*")
             if p.suffix.lower() in _FINAL_EXTS and ".part" not in p.name
-            and not any(marker in p.name for marker in _INTERMEDIATE_MARKERS)
+            and not any(marker in p.name[len(stem):] for marker in _INTERMEDIATE_MARKERS)
         ]
         if not candidates:
             return None

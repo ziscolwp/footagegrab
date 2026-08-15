@@ -119,6 +119,19 @@ class DeliverAndSweepTests(unittest.TestCase):
             found = runner.DownloadRunner._find_output(target)
             self.assertEqual(found, stage / "clip.mkv")
 
+    def test_find_output_still_finds_the_fallbacks_own_sibling_extension(self):
+        # _find_output(tmp_path) is itself called with tmp_path stem
+        # "<clip>.full" (the fallback's whole-video temp target). The marker
+        # exclusion above must not disqualify *that* stem's own legitimate
+        # sibling-extension landing (yt-dlp merging to .mkv/.webm instead of
+        # the requested .mp4) just because ".full" is baked into the stem.
+        with tempfile.TemporaryDirectory() as tmp:
+            stage = Path(tmp)
+            target = stage / "clip.full.mp4"  # requested but never created
+            (stage / "clip.full.mkv").write_bytes(b"z" * 10)
+            found = runner.DownloadRunner._find_output(target)
+            self.assertEqual(found, stage / "clip.full.mkv")
+
     def test_sweep_removes_leftover_staging_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)
@@ -155,8 +168,10 @@ exit 0
 """
 
 # Fails every attempt with a permanent (non-transient) error, after leaving a
-# .part sibling behind — like a real yt-dlp crash mid-download.
+# .part sibling behind — like a real yt-dlp crash mid-download. Logs argv so
+# the test can pin the -o path it was actually given (staged vs. unstaged).
 STUB_PERMANENT_FAILURE = """#!/bin/bash
+echo "$@" >> "{log}"
 out=""
 prev=""
 for arg in "$@"; do
@@ -288,8 +303,9 @@ class RunEndToEndTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              tempfile.TemporaryDirectory() as tools:
             dest = Path(tmp)
+            log = Path(tools) / "argv.log"
             stub = Path(tools) / "ytdlp-stub"
-            _write_stub(stub, STUB_PERMANENT_FAILURE)
+            _write_stub(stub, STUB_PERMANENT_FAILURE, log=log)
             cfg = _base_cfg(tmp, stub, "/bin/ls")
             r = DownloadRunner(lambda: cfg)
             job = Job(url="https://www.youtube.com/watch?v=x", video_id="x",
@@ -297,10 +313,18 @@ class RunEndToEndTests(unittest.TestCase):
             ok, error, final = r.run(job)
             self.assertFalse(ok)
             self.assertEqual(final, "")
+            # Pin staged behaviour directly, rather than only checking
+            # emptiness (which a pre-staging runner, writing straight into
+            # dest and relying on _cleanup_partials, would also satisfy):
+            # the -o path the runner actually gave yt-dlp must sit inside
+            # .fg-tmp, and .fg-tmp must have been created for this run.
+            argv = log.read_text()
+            self.assertIn(str(dest / ".fg-tmp"), argv)
+            stage = dest / ".fg-tmp"
+            self.assertTrue(stage.is_dir())
+            self.assertEqual(list(stage.iterdir()), [])
             visible = [p.name for p in dest.iterdir() if p.name != ".fg-tmp"]
             self.assertEqual(visible, [])
-            stage = dest / ".fg-tmp"
-            self.assertEqual(list(stage.iterdir()) if stage.is_dir() else [], [])
 
     def test_fallback_cut_is_delivered_from_staging(self):
         with tempfile.TemporaryDirectory() as tmp, \
